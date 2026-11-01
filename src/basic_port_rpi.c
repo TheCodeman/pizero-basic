@@ -38,6 +38,7 @@
 #include "term_editor.h"
 #include "terminal.h"
 #include "usb_input.h"
+#include "rpi/wlan.h"
 
 /// What the hardware still to come says.
 #define NOT_YET "not available yet on the Pi Zero"
@@ -1073,15 +1074,118 @@ void port_config_show(void) {
     config_print();
 }
 
-// ---- Wi-Fi and MQTT (later) ---------------------------------------------------------
+// ---- Wi-Fi (scanning so far) and MQTT (later) ---------------------------------------
+
+/// Esc or Ctrl-C while the chip works.
+static bool wifi_stop_key(void) {
+    int c = port_key(0);
+    return c == 27 || c == 3;
+}
+
+/// Starts the chip if it's off, saying so; false (and why) if it won't.
+static bool wifi_start(void) {
+    if (wlan_up())
+        return true;
+    printf("Starting Wi-Fi...");
+    fflush(stdout);
+    const char *err = wlan_start(config.wifi_country);
+    printf("\r                  \r");
+    if (err) {
+        printf("Wi-Fi: %s\n", err);
+        if (!strncmp(err, "no " WLAN_FIRMWARE_DIR, 3 + strlen(WLAN_FIRMWARE_DIR)))
+            printf("The chip's firmware goes in " WLAN_FIRMWARE_DIR " on the card (see README.md).\n");
+        return false;
+    }
+    return true;
+}
+
+static void wifi_status(void) {
+    if (!wlan_up()) {
+        printf("Wi-Fi is off (WIFI ON starts it, WIFI SCAN lists networks)\n");
+        return;
+    }
+    const uint8_t *m = wlan_mac();
+    int rev, id = wlan_chip(&rev);
+    printf("Wi-Fi on: chip %d rev %d, MAC %02X:%02X:%02X:%02X:%02X:%02X\n", id, rev, m[0], m[1], m[2], m[3],
+           m[4], m[5]);
+    if (wlan_version()[0])
+        printf("Firmware: %s\n", wlan_version());
+    printf("Not connected (joining a network is still to come)\n");
+}
+
+#define SCAN_MAX 32
+static wlan_network_t found[SCAN_MAX];  ///< the networks the scan heard, strongest kept
+static int found_count;
+
+static void on_found(const wlan_network_t *net) {
+    if (!net->ssid[0])
+        return;  // a hidden network
+    int i;
+    for (i = 0; i < found_count; i++)
+        if (!strcmp(found[i].ssid, net->ssid))
+            break;
+    if (i == found_count) {
+        if (found_count == SCAN_MAX)
+            return;
+        found_count++;
+        found[i] = *net;
+    } else if (net->rssi > found[i].rssi) {
+        found[i] = *net;
+    }
+}
+
+static int by_signal(const void *a, const void *b) {
+    return ((const wlan_network_t *)b)->rssi - ((const wlan_network_t *)a)->rssi;
+}
+
+static void wifi_scan(void) {
+    if (!wifi_start())
+        return;
+    found_count = 0;
+    printf("Scanning...");
+    fflush(stdout);
+    const char *err = wlan_scan(on_found, wifi_stop_key);
+    printf("\r           \r");
+    if (err) {
+        printf("Scan: %s\n", err);
+        if (strcmp(err, "stopped"))
+            return;
+    }
+    qsort(found, (size_t)found_count, sizeof found[0], by_signal);
+    static const char *const security[] = {"open", "WEP", "WPA", "WPA2"};
+    printf("%-32s  Signal  Ch  Security\n", "Network");
+    for (int i = 0; i < found_count; i++)
+        printf("%-32s  %4d dBm %2u  %s\n", found[i].ssid, found[i].rssi, found[i].channel,
+               security[found[i].security & 3]);
+    if (!found_count)
+        printf("No networks found\n");
+}
 
 bool port_wifi(int what) {
-    (void)what;
-    return false;
+    switch (what) {
+    case 0:
+        wifi_status();
+        break;
+    case 1:
+        if (wifi_start())
+            wifi_status();
+        break;
+    case 2:
+        wlan_stop();
+        printf("Wi-Fi off\n");
+        break;
+    case 3:
+        wifi_scan();
+        break;
+    default:
+        printf("NTP: " NOT_YET " (it needs a network connection)\n");
+        break;
+    }
+    return true;
 }
 int port_wifi_value(int n) {
     (void)n;
-    return 0;
+    return 0;  // not connected: no signal, no clock, the link down
 }
 const char *port_wifi_text(int n) {
     (void)n;

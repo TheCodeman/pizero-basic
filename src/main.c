@@ -22,7 +22,7 @@
 #include "usb_input.h"
 
 #ifndef PIZERO_BASIC_VERSION
-#define PIZERO_BASIC_VERSION "0.4"
+#define PIZERO_BASIC_VERSION "0.5"
 #endif
 
 extern char *heap_limit;
