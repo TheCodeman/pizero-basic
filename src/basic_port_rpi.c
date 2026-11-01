@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "audio.h"
 #include "board_watchdog.h"
@@ -38,6 +39,7 @@
 #include "term_editor.h"
 #include "terminal.h"
 #include "usb_input.h"
+#include "net.h"
 #include "rpi/wlan.h"
 
 /// What the hardware still to come says.
@@ -48,12 +50,13 @@ extern const char *sound_error;
 
 int port_key(uint32_t timeout_us) {
     usb_input_poll();
+    net_poll();
     int c = terminal_getc();
     if (c >= 0 || !timeout_us)
         return c;
     uint64_t end = timer_us() + timeout_us;
     while ((c = terminal_getc()) < 0 && timer_us() < end)
-        ;
+        net_poll();
     return c;
 }
 
@@ -382,8 +385,10 @@ int port_music_state(int what) {
 
 void port_sleep_ms(unsigned ms) {
     uint64_t end = timer_us() + ms * 1000ull;
-    while (timer_us() < end)
+    while (timer_us() < end) {
         board_watchdog_feed();
+        net_poll();
+    }
 }
 
 double port_seconds(void) {
@@ -1088,7 +1093,7 @@ static bool wifi_start(void) {
         return true;
     printf("Starting Wi-Fi...");
     fflush(stdout);
-    const char *err = wlan_start(config.wifi_country);
+    const char *err = net_start();
     printf("\r                  \r");
     if (err) {
         printf("Wi-Fi: %s\n", err);
@@ -1108,9 +1113,43 @@ static void wifi_status(void) {
     int rev, id = wlan_chip(&rev);
     printf("Wi-Fi on: chip %d rev %d, MAC %02X:%02X:%02X:%02X:%02X:%02X\n", id, rev, m[0], m[1], m[2], m[3],
            m[4], m[5]);
-    if (wlan_version()[0])
-        printf("Firmware: %s\n", wlan_version());
-    printf("Not connected (joining a network is still to come)\n");
+    int link = net_link();
+    if (link == NET_UP)
+        printf("Connected to %s, signal %d dBm, IP address %s\n", net_ssid(), net_rssi(), net_ip());
+    else if (net_ssid()[0])
+        printf("%s: %s%s\n", net_ssid(), net_link_text(link), link < 0 ? " (trying again)" : "");
+    else
+        printf("Not connected (WIFI_SSID and WIFI_PASSWORD in " CONFIG_PATH ", then WIFI ON)\n");
+}
+
+/// WIFI ON: joins the network in the settings, waiting (Esc stops waiting).
+static void wifi_on(void) {
+    if (!wifi_start())
+        return;
+    if (!config.wifi_ssid[0]) {
+        wifi_status();
+        return;
+    }
+    if (net_link() == NET_UP && !strcmp(net_ssid(), config.wifi_ssid)) {
+        wifi_status();
+        return;
+    }
+    const char *err = net_connect(config.wifi_ssid, config.wifi_password);
+    if (err) {
+        printf("Wi-Fi: %s\n", err);
+        return;
+    }
+    printf("Joining %s...", config.wifi_ssid);
+    fflush(stdout);
+    uint64_t end = timer_us() + 30000000;
+    int link;
+    while ((link = net_link()) != NET_UP && link >= 0 && timer_us() < end)
+        if (wifi_stop_key())
+            break;
+    printf("\n");
+    if (link != NET_UP && link >= 0)
+        printf("Still joining; WIFI says how it goes\n");
+    wifi_status();
 }
 
 #define SCAN_MAX 32
@@ -1167,29 +1206,45 @@ bool port_wifi(int what) {
         wifi_status();
         break;
     case 1:
-        if (wifi_start())
-            wifi_status();
+        wifi_on();
         break;
     case 2:
-        wlan_stop();
+        net_stop();
         printf("Wi-Fi off\n");
         break;
     case 3:
         wifi_scan();
         break;
-    default:
-        printf("NTP: " NOT_YET " (it needs a network connection)\n");
+    default: {
+        printf("NTP: asking %s...", config.ntp_server[0] ? config.ntp_server : "pool.ntp.org");
+        fflush(stdout);
+        const char *err = net_ntp(NULL, wifi_stop_key);
+        printf("\n");
+        if (err) {
+            printf("NTP: %s\n", err);
+        } else {
+            time_t t = time(NULL);
+            struct tm tm;
+            gmtime_r(&t, &tm);
+            printf("The clock is set: %04d-%02d-%02d %02d:%02d:%02d UTC\n", tm.tm_year + 1900, tm.tm_mon + 1,
+                   tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+        }
         break;
+    }
     }
     return true;
 }
 int port_wifi_value(int n) {
-    (void)n;
-    return 0;  // not connected: no signal, no clock, the link down
+    switch (n) {
+    case 0: return net_link() == NET_UP ? -1 : 0;
+    case 1: return net_rssi();
+    case 2: return net_clock_set() ? -1 : 0;
+    case 3: return net_link();
+    default: return 0;
+    }
 }
 const char *port_wifi_text(int n) {
-    (void)n;
-    return "";
+    return n == 0 ? net_ip() : n == 1 ? net_ssid() : "";
 }
 bool port_mqtt_available(void) { return false; }
 const char *port_mqtt_connect(const char *host, int port) {
