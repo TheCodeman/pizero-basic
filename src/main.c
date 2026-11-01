@@ -1,7 +1,7 @@
 /**
  * @file main.c
  * @brief Pi Zero BASIC: brings the board up (memory, MMU and caches, full ARM
- * clock, serial console, HDMI screen, USB keyboard, SD card), shows the banner, runs AUTORUN.BAS if the
+ * clock, serial console, HDMI screen and sound, USB keyboard, SD card), shows the banner, runs AUTORUN.BAS if the
  * card has one, then BASIC's prompt.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "audio.h"
 #include "basic.h"
 #include "basic_port.h"
 #include "config.h"
@@ -21,7 +22,7 @@
 #include "usb_input.h"
 
 #ifndef PIZERO_BASIC_VERSION
-#define PIZERO_BASIC_VERSION "0.3"
+#define PIZERO_BASIC_VERSION "0.4"
 #endif
 
 extern char *heap_limit;
@@ -30,6 +31,8 @@ void __libc_init_array(void);
 
 /// Why the SD card isn't mounted, or NULL; the same for the screen and USB.
 static const char *sd_error, *fb_error, *usb_error;
+/// Why there is no sound, or NULL (basic_port_rpi.c's MUSIC says it too).
+const char *sound_error;
 
 static void board_init(void) {
     uart_init(115200);
@@ -69,6 +72,8 @@ static void board_banner(void) {
     }
     if (fb_error)
         printf("Screen: %s; the serial port only\n", fb_error);
+    if (!fb_error)
+        printf("Sound: %s\n", sound_error ? sound_error : "HDMI");
     if (usb_error)
         printf("USB: %s\n", usb_error);
     else
@@ -106,6 +111,7 @@ int main(void) {
     fb_error = fb_init();
     if (!fb_error)
         terminal_screen_start();
+    sound_error = fb_error ? "no screen" : audio_init();
     printf("Pi Zero BASIC: starting USB...\n");
     usb_error = usb_input_init();
     sd_error = sd_disk_mount();

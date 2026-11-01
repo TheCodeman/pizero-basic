@@ -17,8 +17,8 @@ This build is GPLv3, because the USB keyboard comes from the USPi library.
    interpreter's screen features and pico-os's text console, and USPi for
    the keyboard and mouse. Text goes to both HDMI and serial, and keys come
    from either one.
-4. **Hardware commands**: PIN, PWM and sound on GPIO18, SPI, I2C, COM1,
-   WATCHDOG and TEMP().
+4. **Sound and hardware commands**: BEEP, SOUND, PLAY and MUSIC over HDMI
+   (done, waiting for a test on the board); PWM, SPI, I2C and COM1 next.
 
 Wi-Fi comes later.
 
@@ -90,8 +90,13 @@ with these differences:
 - **Pins:** `PIN` and `PIN MODE` work on GPIO 0-27 of the header (14 and 15
   are the console). `PIN LED` is the green ACT LED (GPIO47). `TEMP()` is the
   SoC temperature.
-- **Not yet:** `PWM`, `BEEP`/`SOUND`/`PLAY`, `MUSIC`, `I2C`, `SPI` and
-  `COM1` come in step 4.
+- **Sound** comes out of the HDMI monitor's or TV's speakers: `BEEP`,
+  `SOUND`, `PLAY` and `MUSIC` (MOD and XM songs, with pico-os's players).
+  This needs `hdmi_drive=2` in `config.txt` (it is in this repo's), so the
+  firmware runs the link as HDMI, not DVI. The banner's `Sound:` line says
+  if there is none (a DVI monitor, or one without speakers): then the
+  commands run silently.
+- **Not yet:** `PWM`, `I2C`, `SPI` and `COM1`.
   The Pi has no ADC (`ADC()` gives -1) and no PIO (no `NEOPIXEL`). Wi-Fi
   comes later.
 - The Pi has no clock that keeps time while it is off: `DATE$` and `TIME$`
@@ -108,6 +113,9 @@ with these differences:
 | `src/rpi/emmc.c` | the SD card slot (the EMMC controller) |
 | `src/sd_disk.c` | FatFs's disk functions on the card, and its clock |
 | `src/rpi/fb.c` | the HDMI framebuffer (640x480, RGB332 palette) |
+| `src/rpi/hdmi_sound.c` | sound over HDMI: 48 kHz stereo into the HDMI audio FIFO by DMA (after Circle's driver, GPLv3) |
+| `src/audio.c` | the sound mixer: tones, PLAY's queue and the music, as in pico-os |
+| `src/mod/` | pico-os's MOD and XM players (MIT), as they are there |
 | `src/rpi/ticker.c`, `src/rpi/irq.c` | the 100 Hz tick and its timers; interrupts |
 | `src/terminal.c` | the terminal: output to serial and screen, keys from both |
 | `src/usb_input.c` | the USB keyboard and mouse through USPi, and USPi's environment |

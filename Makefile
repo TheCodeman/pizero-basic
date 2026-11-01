@@ -24,10 +24,10 @@ ASFLAGS := $(ARCH) -g
 LDFLAGS := $(ARCH) -nostartfiles -T boot/link.ld -Wl,--gc-sections -Wl,-Map=$(BUILD)/kernel.map
 LIBS    := -lc -lm -lgcc
 
-SRCS := src/main.c src/terminal.c src/basic_port_rpi.c src/sd_disk.c src/usb_input.c \
+SRCS := src/main.c src/terminal.c src/basic_port_rpi.c src/sd_disk.c src/usb_input.c src/audio.c \
         $(wildcard src/rpi/*.c)
 SHARED := src/basic/basic.c src/term_editor.c src/xfer.c src/config.c src/fatfs/ff.c \
-          src/fatfs/ffunicode.c $(wildcard src/screen/*.c)
+          src/fatfs/ffunicode.c $(wildcard src/screen/*.c) src/mod/mod.c src/mod/xm.c
 SRCS += $(SHARED)
 $(SHARED:%.c=$(BUILD)/%.o): CFLAGS += $(SHARED_CFLAGS)
 # USPi (GPLv3, R. Stange): built as its own Rules.mk builds it.
