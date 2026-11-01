@@ -58,11 +58,22 @@ int _read(int fd, char *buf, int len) {
     return n;
 }
 
+/// The wall clock: microseconds since 1970 at timer 0 (settimeofday sets it;
+/// the Pi has no clock of its own, so it starts at 1 Jan 1970).
+static int64_t clock_offset_us;
+
 int _gettimeofday(struct timeval *tv, void *tz) {
     (void)tz;
-    uint64_t us = timer_us();
+    uint64_t us = timer_us() + clock_offset_us;
     tv->tv_sec = (time_t)(us / 1000000u);
     tv->tv_usec = (suseconds_t)(us % 1000000u);
+    return 0;
+}
+
+int settimeofday(const struct timeval *tv, const struct timezone *tz) {
+    (void)tz;
+    if (tv)
+        clock_offset_us = (int64_t)tv->tv_sec * 1000000 + tv->tv_usec - (int64_t)timer_us();
     return 0;
 }
 

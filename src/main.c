@@ -1,94 +1,105 @@
 /**
  * @file main.c
- * @brief Pi Zero BASIC, step 1: bring the board up (memory, MMU and caches,
- * full ARM clock, serial console) and run a line-echo loop that proves the
- * console, the C library, floating point and the heap all work.
+ * @brief Pi Zero BASIC: brings the board up (memory, MMU and caches, full ARM
+ * clock, serial console, SD card), shows the banner, runs AUTORUN.BAS if the
+ * card has one, then BASIC's prompt.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
+#include "basic.h"
+#include "basic_port.h"
+#include "config.h"
 #include "console.h"
+#include "ff.h"
 #include "rpi/rpi.h"
+#include "sd_disk.h"
 
 #ifndef PIZERO_BASIC_VERSION
-#define PIZERO_BASIC_VERSION "0.1"
+#define PIZERO_BASIC_VERSION "0.2"
 #endif
 
 extern char *heap_limit;
-extern char __heap_start[];
-size_t heap_room(void);
 uint32_t mbox_arm_full_speed(void);
 void __libc_init_array(void);
 
+/// Why the SD card isn't mounted, or NULL.
+static const char *sd_error;
+
 static void board_init(void) {
     uart_init(115200);
-
     uint32_t base = 0, size = 0;
     if (!mbox_arm_memory(&base, &size) || size == 0)
         size = 0x1C000000;  // 448 MB: a Zero with gpu_mem=64
-    uint32_t top = base + size;
-    heap_limit = (char *)top;
-    mmu_init(top);
+    heap_limit = (char *)(base + size);
+    mmu_init(base + size);
     mbox_arm_full_speed();
     __libc_init_array();
     setvbuf(stdout, NULL, _IONBF, 0);
+    uart_enable_irq();
+    irq_init();
 }
 
-/// Reads a line with backspace; returns its length.
-static int read_line(char *buf, int size) {
-    int n = 0;
-    for (;;) {
-        int c = console_getc_wait();
-        if (c == '\r' || c == '\n') {
-            fputs("\n", stdout);
-            buf[n] = 0;
-            return n;
-        }
-        if ((c == 8 || c == 127) && n > 0) {
-            n--;
-            fputs("\b \b", stdout);
-        } else if (c >= 32 && c < 127 && n < size - 1) {
-            buf[n++] = (char)c;
-            putchar(c);
+static const char *board_name(uint32_t rev) {
+    switch (rev & 0xFFFFFF) {
+    case 0x9000c1: return "Raspberry Pi Zero W";
+    case 0x900092: case 0x900093: case 0x920092: case 0x920093: return "Raspberry Pi Zero";
+    default: return "Raspberry Pi (BCM2835)";
+    }
+}
+
+/// The banner: the version, the board, and the SD card.
+static void board_banner(void) {
+    uint32_t rev = mbox_board_revision();
+    printf("Pi Zero BASIC %s on the %s, %lu MHz\n", PIZERO_BASIC_VERSION, board_name(rev),
+           (unsigned long)(mbox_clock_rate(3) / 1000000));
+    if (sd_error) {
+        printf("SD card: %s; files won't work\n", sd_error);
+    } else {
+        uint32_t total, free_kb;
+        sd_disk_space(&total, &free_kb);
+        printf("SD card (SD:): %lu MB, %lu MB free\n", (unsigned long)(total >> 10),
+               (unsigned long)(free_kb >> 10));
+    }
+    config_warnings();
+}
+
+/// AUTORUN.BAS on the card, unless Esc or Ctrl-C comes within a second.
+static const char *autorun(void) {
+    FILINFO info;
+    if (sd_error || f_stat("SD:/AUTORUN.BAS", &info) != FR_OK || (info.fattrib & AM_DIR))
+        return NULL;
+    printf("AUTORUN.BAS (Esc or Ctrl-C now skips it)\n");
+    uint64_t end = timer_us() + 1000000;
+    while (timer_us() < end) {
+        int c = console_getc();
+        if (c == 3 || c == 27) {
+            printf("AUTORUN.BAS skipped\n");
+            return NULL;
         }
     }
+    printf("Running AUTORUN.BAS; Ctrl-C stops it\n");
+    if (config.watchdog) {
+        printf("Watchdog on: %d ms (WATCHDOG = in " CONFIG_PATH ")\n", config.watchdog);
+        port_watchdog_set(config.watchdog);
+    }
+    return "SD:/AUTORUN.BAS";
 }
 
 int main(void) {
     board_init();
-
-    uint32_t rev = mbox_board_revision();
-    printf("\nPi Zero BASIC %s (step 1: console)\n", PIZERO_BASIC_VERSION);
-    printf("Board revision %06lx%s, ARM %lu MHz, %lu MB for the ARM, heap %lu MB\n",
-           (unsigned long)rev, rev == 0x9000c1 ? " (Zero W)" : "",
-           (unsigned long)(mbox_clock_rate(3) / 1000000),
-           (unsigned long)((uint32_t)(uintptr_t)heap_limit >> 20),
-           (unsigned long)(heap_room() >> 20));
-
-    // A quick check that floating point and malloc work.
-    double *d = malloc(1000 * sizeof *d);
-    double sum = 0;
-    for (int i = 0; i < 1000; i++) {
-        d[i] = 1.0 / (i + 1);
-        sum += d[i];
-    }
-    free(d);
-    printf("H(1000) = %.6f (should be 7.485471)\n", sum);
-    uint32_t t = mbox_temperature();
-    if (t)
-        printf("SoC temperature %.1f C\n", t / 1000.0);
-    printf("Type a line and it comes back; REBOOT restarts.\n");
-
-    char line[256];
+    gpio_write(47, 1);  // the ACT LED off (it is on when low)
+    gpio_function(47, GPIO_OUT);
+    sd_error = sd_disk_mount();
+    config_load();
+    printf("\x1b[0m\x1b[2J\x1b[H");
+    board_banner();
+    const char *first = autorun();
     for (;;) {
-        fputs("> ", stdout);
-        read_line(line, sizeof line);
-        if (strcmp(line, "REBOOT") == 0 || strcmp(line, "reboot") == 0)
-            board_reboot();
-        uint64_t t0 = timer_us();
-        printf("%s  [%u chars, %.3f s up]\n", line, (unsigned)strlen(line), t0 / 1e6);
+        basic_main(first);  // SYSTEM comes back here
+        first = NULL;
+        printf("\n");
     }
 }

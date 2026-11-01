@@ -51,8 +51,51 @@ void uart_putc(char c) {
     REG(UART_DR) = (uint8_t)c;
 }
 
+// ---- received bytes: a ring filled by the UART's interrupt ------------------------
+// The PL011's FIFO holds only 16 bytes; a pasted listing would overflow it
+// while BASIC stores a line.
+
+#define RX_SIZE 4096
+static volatile uint8_t rx_buf[RX_SIZE];
+static volatile uint32_t rx_head, rx_tail;  // written by the IRQ, read here
+static bool rx_irq_on;
+
+/// Drains the FIFO into the ring (from the IRQ, or by polling).
+static void rx_drain(void) {
+    while (!(REG(UART_FR) & FR_RXFE)) {
+        uint8_t c = (uint8_t)REG(UART_DR);
+        uint32_t next = (rx_head + 1) % RX_SIZE;
+        if (next != rx_tail) {  // full: the byte is lost
+            rx_buf[rx_head] = c;
+            rx_head = next;
+        }
+    }
+}
+
+void uart_irq(void) {
+    rx_drain();
+    REG(UART_ICR) = (1u << 4) | (1u << 6);  // RX and RX timeout
+}
+
+void uart_enable_irq(void) {
+    REG(UART_IMSC) = (1u << 4) | (1u << 6);
+    REG(IRQ_BASE + 0x14) = 1u << (57 - 32);  // enable IRQ 57, UART0
+    rx_irq_on = true;
+}
+
 int uart_getc(void) {
-    if (REG(UART_FR) & FR_RXFE)
+    if (rx_tail == rx_head) {
+        // Nothing in the ring: look in the FIFO too, in case bytes are
+        // sitting below its interrupt level (QEMU has no RX timeout).
+        if (rx_irq_on)
+            __asm volatile("cpsid i" ::: "memory");
+        rx_drain();
+        if (rx_irq_on)
+            __asm volatile("cpsie i" ::: "memory");
+    }
+    if (rx_tail == rx_head)
         return -1;
-    return (int)(REG(UART_DR) & 0xFF);
+    int c = rx_buf[rx_tail];
+    rx_tail = (rx_tail + 1) % RX_SIZE;
+    return c;
 }
