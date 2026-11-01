@@ -21,3 +21,6 @@ gpu_mem=64
 hdmi_group=2
 hdmi_mode=4
 disable_overscan=1
+
+# HDMI mode, not DVI, even in the monitor timings above: sound goes over HDMI.
+hdmi_drive=2

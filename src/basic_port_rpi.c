@@ -5,8 +5,8 @@
  * Text goes to the serial terminal (ANSI/VT100, GPIO14/15) and the HDMI
  * screen, whose text console, graphics, pages and pictures are pico-os's;
  * keys come from either the serial port or a USB keyboard (USPi). Files are
- * on the SD card. PIN, PIN MODE and the LED work; PWM, sound, MUSIC, I2C,
- * SPI and COM1 come in step 4.
+ * on the SD card. Sound (BEEP, SOUND, PLAY, MUSIC) goes over HDMI. PIN, PIN
+ * MODE and the LED work; PWM, I2C, SPI and COM1 come next.
  *
  * Much of this is pico-basic's basic_port_serial.c (Ken Segler, MIT): the
  * code page 437 table, the memory calls and the XMODEM glue.
@@ -23,10 +23,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio.h"
 #include "board_watchdog.h"
 #include "config.h"
 #include "dvi.h"
+#include "ff.h"
 #include "image.h"
+#include "mod/mod.h"
+#include "mod/xm.h"
 #include "rpi/rpi.h"
 #include "screen/console.h"
 #include "screen/mouse.h"
@@ -36,6 +40,9 @@
 
 /// What the hardware still to come says.
 #define NOT_YET "not available yet on the Pi Zero"
+
+/// Why there is no sound (main.c), or NULL.
+extern const char *sound_error;
 
 int port_key(uint32_t timeout_us) {
     usb_input_poll();
@@ -58,24 +65,22 @@ void port_put_glyph(int c) {
     terminal_put_glyph(c);
 }
 
-// ---- Sound (step 4: PWM on GPIO18) -----------------------------------------------
+// ---- Sound: over HDMI (audio.c) ----------------------------------------------------
 
 bool port_play(unsigned freq_hz, unsigned ms) {
-    (void)freq_hz;
-    (void)ms;
-    return true;
+    return audio_play(freq_hz, ms);
 }
 
 int port_play_pending(void) {
-    return 0;
+    return audio_play_pending();
 }
 
 void port_play_stop(void) {
+    audio_play_stop();
 }
 
 void port_beep(unsigned freq_hz, unsigned ms) {
-    (void)freq_hz;
-    port_sleep_ms(ms);
+    audio_beep(freq_hz, ms);  // BASIC waits for it
 }
 
 // ---- The screen: pico-os's text console and 640x480 RGB332 graphics ------------
@@ -210,33 +215,165 @@ bool port_key_down(int scan) {
     return usb_key_down(scan);
 }
 
-// ---- MUSIC (MOD and XM songs): needs sound, step 4 ------------------------------------
+// ---- MUSIC: a MOD or XM song in the background (src/mod, pico-os's players) ----------
+// As pico-os's port, without its PSRAM refresh: the song is in the heap.
 
-const char *port_music_play(const char *path, bool loop) {
-    (void)path;
-    (void)loop;
-    return NOT_YET;
+static mod_song_t *music;  ///< a MOD, or
+static xm_song_t *xmusic;  ///< an XM
+static int music_volume = 100;
+static bool music_paused;
+
+void *mod_alloc(size_t size) {
+    return malloc(size);
+}
+
+void mod_free(void *p) {
+    free(p);
+}
+
+void *xm_alloc(size_t size) {
+    return malloc(size);
+}
+
+void xm_free(void *p) {
+    free(p);
 }
 
 void port_music_stop(void) {
+    if (!music && !xmusic)
+        return;
+    if (music)
+        mod_stop();
+    if (xmusic)
+        xm_stop();
+    // The sound interrupt runs to its end before this goes on, so once the
+    // source is gone nothing is rendering.
+    audio_set_source(NULL);
+    mod_set_loop(true);
+    mod_pause(false);
+    xm_set_loop(true);
+    xm_pause(false);
+    if (xmusic)
+        xm_release();
+    mod_song_t *s = music;
+    xm_song_t *x = xmusic;
+    music = NULL;
+    xmusic = NULL;
+    if (s) {
+        mod_clear(s);
+        free(s);
+    }
+    if (x) {
+        xm_clear(x);
+        free(x);
+    }
+}
+
+const char *port_music_play(const char *path, bool loop) {
+    port_music_stop();
+    if (sound_error)
+        return sound_error;
+    FIL f;
+    if (f_open(&f, path, FA_READ) != FR_OK)
+        return "file not found";
+    uint32_t size = f_size(&f);
+    uint8_t *data = size && size <= (32u << 20) ? malloc(size) : NULL;
+    UINT got = 0;
+    bool ok = data && f_read(&f, data, size, &got) == FR_OK && got == size;
+    f_close(&f);
+    if (!ok) {
+        free(data);
+        return data ? "can't read the file" : "not enough memory";
+    }
+    const char *err;
+    if (xm_is_xm(data, size)) {
+        xm_song_t *x = malloc(sizeof *x);
+        err = x ? xm_load(x, data, size) : "not enough memory";
+        free(data);
+        if (err) {
+            if (x) {
+                xm_clear(x);
+                free(x);
+            }
+            return err;
+        }
+        xmusic = x;
+    } else {
+        mod_song_t *s = malloc(sizeof *s);
+        err = s ? mod_load(s, data, size) : "not enough memory";
+        free(data);
+        if (err) {
+            if (s) {
+                mod_clear(s);
+                free(s);
+            }
+            return err;
+        }
+        music = s;
+    }
+    music_paused = false;
+    if (xmusic) {
+        xm_set_loop(loop);
+        xm_set_volume(music_volume);
+        xm_pause(false);
+        if (!xm_play(xmusic, 0, 0)) {
+            port_music_stop();
+            return "not enough memory for the player";
+        }
+        audio_set_source(xm_render_frame);
+    } else {
+        mod_set_loop(loop);
+        mod_set_volume(music_volume);
+        mod_pause(false);
+        mod_set_tempo(6, 125);
+        mod_play(music, 0, 0, false);
+        audio_set_source(mod_render);
+    }
+    return NULL;
 }
 
 void port_music_pause(bool paused) {
-    (void)paused;
+    music_paused = paused;
+    if (music)
+        mod_pause(paused);
+    if (xmusic)
+        xm_pause(paused);
 }
 
 void port_music_volume(int percent) {
-    (void)percent;
+    music_volume = percent < 0 ? 0 : percent > 100 ? 100 : percent;
+    mod_set_volume(music_volume);
+    xm_set_volume(music_volume);
 }
 
 void port_music_pos(int order, int row) {
-    (void)order;
-    (void)row;
+    if (music && order >= 0 && order < music->length)
+        mod_play(music, order, row, false);
+    if (xmusic && order >= 0 && order < xmusic->length)
+        xm_play(xmusic, order, row);
 }
 
 int port_music_state(int what) {
-    (void)what;
-    return 0;
+    if (xmusic) {
+        xm_status_t st;
+        xm_get_status(&st);
+        switch (what) {
+        case 0: return st.playing && !music_paused ? -1 : 0;
+        case 1: return st.order;
+        case 2: return st.row;
+        default: return st.pattern;
+        }
+    }
+    if (!music)
+        return 0;
+    mod_status_t st;
+    mod_get_status(&st);
+    switch (what) {
+    case 0: return st.state != MOD_STOPPED && !music_paused ? -1 : 0;
+    case 1: return st.order;
+    case 2: return st.row;
+    default: return st.pattern;
+    }
 }
 
 // ---- Time ------------------------------------------------------------------------
