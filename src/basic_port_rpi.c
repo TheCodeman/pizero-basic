@@ -2,11 +2,11 @@
  * @file basic_port_rpi.c
  * @brief basic_port.h for the Raspberry Pi Zero / Zero W, bare metal.
  *
- * Step 2: text goes to and from a terminal (ANSI/VT100) on the serial port
- * (GPIO14/15), and files are on the SD card. Built with BASIC_NO_SCREEN, so
- * graphics, pictures, the mouse and MUSIC give "Feature not available"
- * until step 3 brings the HDMI screen. PIN, PIN MODE and the LED work; PWM,
- * sound, ADC, I2C, SPI and COM1 come in step 4.
+ * Text goes to the serial terminal (ANSI/VT100, GPIO14/15) and the HDMI
+ * screen, whose text console, graphics, pages and pictures are pico-os's;
+ * keys come from either the serial port or a USB keyboard (USPi). Files are
+ * on the SD card. PIN, PIN MODE and the LED work; PWM, sound, MUSIC, I2C,
+ * SPI and COM1 come in step 4.
  *
  * Much of this is pico-basic's basic_port_serial.c (Ken Segler, MIT): the
  * code page 437 table, the memory calls and the XMODEM glue.
@@ -25,71 +25,37 @@
 
 #include "board_watchdog.h"
 #include "config.h"
-#include "console.h"
+#include "dvi.h"
 #include "image.h"
 #include "rpi/rpi.h"
-#include "spr.h"
+#include "screen/console.h"
+#include "screen/mouse.h"
 #include "term_editor.h"
+#include "terminal.h"
+#include "usb_input.h"
 
-/// What the screen-only features say if asked anyway.
-#define NO_SCREEN "not available on a serial terminal"
 /// What the hardware still to come says.
 #define NOT_YET "not available yet on the Pi Zero"
 
 int port_key(uint32_t timeout_us) {
-    int c = console_getc();
+    usb_input_poll();
+    int c = terminal_getc();
     if (c >= 0 || !timeout_us)
         return c;
     uint64_t end = timer_us() + timeout_us;
-    while ((c = console_getc()) < 0 && timer_us() < end)
+    while ((c = terminal_getc()) < 0 && timer_us() < end)
         ;
     return c;
 }
 
-/// The IBM PC's pictures for control codes 1-31, as Unicode.
-static const uint16_t cp437_low[32] = {
-    0x0020, 0x263A, 0x263B, 0x2665, 0x2666, 0x2663, 0x2660, 0x2022, 0x25D8, 0x25CB, 0x25D9,
-    0x2642, 0x2640, 0x266A, 0x266B, 0x263C, 0x25BA, 0x25C4, 0x2195, 0x203C, 0x00B6, 0x00A7,
-    0x25AC, 0x21A8, 0x2191, 0x2193, 0x2192, 0x2190, 0x221F, 0x2194, 0x25B2, 0x25BC,
-};
-
-/// The IBM PC's characters 127-255, as Unicode.
-static const uint16_t cp437_high[129] = {
-    0x2302,
-    0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7, 0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
-    0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9, 0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
-    0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA, 0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
-    0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556, 0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
-    0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F, 0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
-    0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B, 0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
-    0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4, 0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
-    0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
-};
-
 int port_glyph_utf8(int c, char *out) {
-    // The terminal has no PC character set: send the character's picture as
-    // UTF-8 (most terminals are), so CHR$(1) is a smiley and CHR$(219) a block.
-    unsigned u = c >= 0 && c < 32 ? cp437_low[c] : c >= 127 && c < 256 ? cp437_high[c - 127] : '?';
-    if (u < 0x80) {
-        out[0] = (char)u;
-        return 1;
-    }
-    if (u < 0x800) {
-        out[0] = (char)(0xC0 | u >> 6);
-        out[1] = (char)(0x80 | (u & 0x3F));
-        return 2;
-    }
-    out[0] = (char)(0xE0 | u >> 12);
-    out[1] = (char)(0x80 | (u >> 6 & 0x3F));
-    out[2] = (char)(0x80 | (u & 0x3F));
-    return 3;
+    // The full-screen editor sends a control code's picture this way: the
+    // serial terminal shows it, and terminal.c draws it on the screen too.
+    return cp437_utf8(c, out);
 }
 
 void port_put_glyph(int c) {
-    // putchar, not fwrite: stdout is unbuffered, so it goes out in order.
-    char buf[3];
-    for (int i = 0, n = port_glyph_utf8(c, buf); i < n; ++i)
-        putchar((unsigned char)buf[i]);
+    terminal_put_glyph(c);
 }
 
 // ---- Sound (step 4: PWM on GPIO18) -----------------------------------------------
@@ -112,25 +78,19 @@ void port_beep(unsigned freq_hz, unsigned ms) {
     port_sleep_ms(ms);
 }
 
-// ---- What a screen would do -----------------------------------------------------
+// ---- The screen: pico-os's text console and 640x480 RGB332 graphics ------------
 
 void port_get_cell(int row, int col, uint8_t *ch, uint8_t *attr) {
-    (void)row;
-    (void)col;
-    *ch = ' ';  // the terminal can't be read back
-    *attr = 7;
+    console_get_cell(row, col, ch, attr);
 }
 
 void port_set_cell(int row, int col, uint8_t ch, uint8_t attr) {
-    (void)row;
-    (void)col;
-    (void)ch;
-    (void)attr;
+    console_set_cell(row, col, ch, attr);
 }
 
 bool port_shell(const char *command) {
     (void)command;
-    return false;
+    return false;  // no shell under BASIC on the Pi
 }
 
 void port_edit(const char *path) {
@@ -141,84 +101,121 @@ void port_edit_file(const char *path) {
     term_edit(path, false);
 }
 
-const char *port_set_pages(int active, int visual) {
-    return active || visual ? NO_SCREEN : NULL;
+// Screen pages: the page on show is the framebuffer; the others are kept in
+// RAM and swapped in by copying when SCREEN changes the visual page (as
+// pico-os does).
+
+#define MAX_PAGES 8
+#define PAGE_BYTES (DVI_WIDTH * DVI_HEIGHT)
+
+static uint8_t *pages[MAX_PAGES];  ///< NULL until used; stale while on show
+static int visual_page;
+static uint8_t *draw_fb = dvi_framebuf;  ///< where drawing goes
+
+static bool need_page(int n) {
+    if (!pages[n]) {
+        pages[n] = malloc(PAGE_BYTES);
+        if (!pages[n])
+            return false;
+        memset(pages[n], 0, PAGE_BYTES);
+    }
+    return true;
 }
 
-void port_reset_pages(void) {
+const char *port_set_pages(int active, int visual) {
+    if (active < 0 || active >= MAX_PAGES || visual < 0 || visual >= MAX_PAGES)
+        return "no such page";
+    if ((active != visual && !need_page(active)) ||
+        (visual != visual_page && (!need_page(visual) || !need_page(visual_page))))
+        return "not enough memory for the screen pages";
+    if (visual != visual_page) {
+        memcpy(pages[visual_page], dvi_framebuf, PAGE_BYTES);
+        memcpy(dvi_framebuf, pages[visual], PAGE_BYTES);
+        visual_page = visual;
+    }
+    draw_fb = active == visual ? dvi_framebuf : pages[active];
+    return NULL;
 }
 
 const char *port_copy_page(int from, int to) {
-    (void)from;
-    (void)to;
-    return NO_SCREEN;
+    if (from < 0 || from >= MAX_PAGES || to < 0 || to >= MAX_PAGES)
+        return "no such page";
+    if (from == to)
+        return NULL;
+    uint8_t *src = from == visual_page ? dvi_framebuf : (need_page(from) ? pages[from] : NULL);
+    uint8_t *dst = to == visual_page ? dvi_framebuf : (need_page(to) ? pages[to] : NULL);
+    if (!src || !dst)
+        return "not enough memory for the screen pages";
+    memcpy(dst, src, PAGE_BYTES);
+    return NULL;
+}
+
+void port_reset_pages(void) {
+    port_set_pages(0, 0);
+    for (int i = 0; i < MAX_PAGES; ++i) {
+        free(pages[i]);
+        pages[i] = NULL;
+    }
 }
 
 void port_fill_rect(int x, int y, int w, int h, uint8_t rgb332) {
-    (void)x;
-    (void)y;
-    (void)w;
-    (void)h;
-    (void)rgb332;
+    uint8_t *row = &draw_fb[y * DVI_WIDTH + x];
+    for (int i = 0; i < h; ++i, row += DVI_WIDTH)
+        memset(row, rgb332, w);
 }
 
 uint8_t port_get_pixel(int x, int y) {
-    (void)x;
-    (void)y;
-    return 0;
+    return draw_fb[y * DVI_WIDTH + x];
 }
 
 const char *port_image(const char *path, int x, int y, int w, int h, int sx, int sy, bool fit,
                        int cx0, int cy0, int cx1, int cy1) {
-    (void)path, (void)x, (void)y, (void)w, (void)h, (void)sx, (void)sy, (void)fit;
-    (void)cx0, (void)cy0, (void)cx1, (void)cy1;
-    return NO_SCREEN;
+    image_t img;
+    const char *err;
+    if (!image_load(path, w ? w : 640, h ? h : 480, &img, &err))
+        return err;
+    if (!w) {
+        w = img.w * sx;
+        h = img.h * sy;
+    } else if (fit) {
+        image_fit(&img, &x, &y, &w, &h);
+    }
+    image_clip_t clip = {cx0, cy0, cx1, cy1};
+    image_draw(&img, draw_fb, x, y, w, h, &clip);
+    image_free(&img);
+    return NULL;
 }
 
 const char *port_save_image(const char *path) {
-    (void)path;
-    return NO_SCREEN;
+    const char *err;
+    return image_save_bmp(path, dvi_framebuf, &err) ? NULL : err;
 }
 
-bool image_load(const char *path, int want_w, int want_h, image_t *img, const char **err) {
-    (void)path, (void)want_w, (void)want_h;
-    memset(img, 0, sizeof *img);
-    *err = NO_SCREEN;
-    return false;
-}
-
-void image_free(image_t *img) {
-    (void)img;
-}
-
-bool spr_load(const char *path, spr_info_t *info, spr_put_fn put, void *ctx, const char **err) {
-    (void)path, (void)info, (void)put, (void)ctx;
-    *err = NO_SCREEN;
-    return false;
-}
+// ---- The mouse and the keyboard's held keys (usb_input.c) -------------------------
 
 bool port_mouse(int *x, int *y, int *buttons) {
-    *x = *y = *buttons = 0;
-    return false;  // no mouse: MOUSEX, MOUSEY and MOUSEB are 0
+    mouse_get(x, y, buttons);
+    return mouse_count() > 0;
 }
 
 int port_mouse_wheel(void) {
-    return 0;
+    return mouse_wheel();
 }
 
 void port_mouse_pointer(bool on) {
-    (void)on;
+    mouse_pointer(on ? MOUSE_POINTER_TEXT : MOUSE_POINTER_OFF);
 }
 
 bool port_key_down(int scan) {
-    (void)scan;
-    return false;  // a terminal sends keys, not whether they're held
+    return usb_key_down(scan);
 }
+
+// ---- MUSIC (MOD and XM songs): needs sound, step 4 ------------------------------------
 
 const char *port_music_play(const char *path, bool loop) {
     (void)path;
     (void)loop;
-    return NO_SCREEN;
+    return NOT_YET;
 }
 
 void port_music_stop(void) {
@@ -466,7 +463,7 @@ static int x_getc(void *ctx, unsigned timeout_ms) {
 /// @param len their count
 static void x_write(void *ctx, const uint8_t *data, int len) {
     (void)ctx;
-    console_write_raw((const char *)data, len);  // no CR LF
+    terminal_write_raw((const char *)data, len);  // no CR LF
 }
 
 /// Opens the file to send.

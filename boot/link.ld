@@ -62,5 +62,8 @@ SECTIONS
     . = ALIGN(0x100000);
     __heap_start = .;
 
+    /* The screen: fb.c maps the GPU's framebuffer here. */
+    dvi_framebuf = 0x30000000;
+
     /DISCARD/ : { *(.comment) *(.note*) }
 }

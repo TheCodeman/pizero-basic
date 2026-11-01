@@ -11,7 +11,7 @@
 #include <sys/time.h>
 #include <sys/times.h>
 
-#include "console.h"
+#include "terminal.h"
 #include "rpi.h"
 
 extern char __heap_start[];
@@ -37,7 +37,7 @@ int _write(int fd, const char *buf, int len) {
         errno = EBADF;
         return -1;
     }
-    console_write(buf, len);
+    terminal_write(buf, len);
     return len;
 }
 
@@ -48,7 +48,7 @@ int _read(int fd, char *buf, int len) {
     }
     int n = 0;
     while (n < len) {
-        int c = console_getc_wait();
+        int c = terminal_getc_wait();
         if (c == '\r')
             c = '\n';
         buf[n++] = (char)c;
