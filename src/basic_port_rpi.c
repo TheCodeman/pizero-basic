@@ -6,7 +6,8 @@
  * screen, whose text console, graphics, pages and pictures are pico-os's;
  * keys come from either the serial port or a USB keyboard (USPi). Files are
  * on the SD card. Sound (BEEP, SOUND, PLAY, MUSIC) goes over HDMI. PIN, PIN
- * MODE and the LED work; PWM, I2C, SPI and COM1 come next.
+ * MODE, PWM, I2C, SPI and the LED work, and COM1 borrows the console's
+ * UART while it is open.
  *
  * Much of this is pico-basic's basic_port_serial.c (Ken Segler, MIT): the
  * code page 437 table, the memory calls and the XMODEM glue.
@@ -433,8 +434,11 @@ bool port_stack_low(void) {
 #define PIN_COUNT 28
 #define LED_PIN 47
 
-/// The pins BASIC has touched (PINS lists them, the reset puts them back).
-static uint64_t pins_used;
+/// What BASIC has made of each pin.
+enum { UNUSED, INPUT, OUTPUT, PULLUP, PULLDOWN, PWM, I2C, SPI, COM };
+static bool com_open;  ///< COM1 has the console's UART
+static uint8_t pin_use[LED_PIN + 1];
+static double pwm_freq[2];  ///< what each PWM channel runs at
 
 int port_pin_count(void) {
     return LED_PIN + 1;  // so PIN 47 (the LED) is in range
@@ -454,41 +458,85 @@ const char *port_pin_reserved(int pin) {
     return NULL;
 }
 
+/// Frees a pin from PWM, I2C or SPI if BASIC's PIN commands take it over.
+static void pin_release(int pin);
+
 void port_pin_mode(int pin, int mode) {
-    pins_used |= 1ull << pin;
+    pin_release(pin);
     switch (mode) {
     case PORT_PIN_OUTPUT:
         gpio_function(pin, GPIO_OUT);
+        pin_use[pin] = OUTPUT;
         break;
     case PORT_PIN_PULLUP:
         gpio_function(pin, GPIO_IN);
         gpio_pull(pin, GPIO_PULL_UP);
+        pin_use[pin] = PULLUP;
         break;
     case PORT_PIN_PULLDOWN:
         gpio_function(pin, GPIO_IN);
         gpio_pull(pin, GPIO_PULL_DOWN);
+        pin_use[pin] = PULLDOWN;
         break;
     default:
         gpio_function(pin, GPIO_IN);
         gpio_pull(pin, GPIO_PULL_NONE);
+        pin_use[pin] = INPUT;
         break;
     }
 }
 
 void port_pin_write(int pin, int level) {
-    pins_used |= 1ull << pin;
-    gpio_function(pin, GPIO_OUT);
+    if (pin_use[pin] != OUTPUT)
+        port_pin_mode(pin, PORT_PIN_OUTPUT);
     gpio_write(pin, pin == LED_PIN ? !level : level);  // the LED is on when low
 }
 
 int port_pin_read(int pin) {
+    if (pin_use[pin] == UNUSED || pin_use[pin] == PWM)
+        port_pin_mode(pin, PORT_PIN_INPUT);
     return gpio_read(pin);
 }
 
+/// "1.5k" and so on.
+static const char *freq_text(double f, char *out, size_t n) {
+    if (f >= 1e6)
+        snprintf(out, n, "%gM", f / 1e6);
+    else if (f >= 1e3)
+        snprintf(out, n, "%gk", f / 1e3);
+    else
+        snprintf(out, n, "%g", f);
+    return out;
+}
+
 void port_pwm(int pin, double freq, double duty) {
-    (void)freq;
-    (void)duty;
-    printf("PWM on GPIO%d: %s\n", pin, NOT_YET);
+    int ch = pwm_channel(pin);
+    if (ch < 0) {
+        if (freq > 0)
+            printf("PWM is on GPIO12, 13, 18 and 19 only\n");
+        return;
+    }
+    if (freq <= 0) {
+        if (pin_use[pin] == PWM) {
+            int partner = pin < 18 ? pin + 6 : pin - 6;
+            if (pin_use[partner] != PWM)
+                pwm_set(pin, 0, 0);
+            gpio_function(pin, GPIO_IN);
+            pin_use[pin] = INPUT;
+        }
+        return;
+    }
+    int partner = pin < 18 ? pin + 6 : pin - 6;  // 12 and 18, 13 and 19
+    if (pin_use[pin] != PWM)
+        pin_release(pin);
+    double got = pwm_set(pin, freq, duty);
+    if (pin_use[partner] == PWM && pwm_freq[ch] != got) {
+        char text[16];
+        printf("Warning: GPIO%d shares a PWM channel with GPIO%d; both now run at %s Hz\n",
+               partner, pin, freq_text(got, text, sizeof text));
+    }
+    pwm_freq[ch] = got;
+    pin_use[pin] = PWM;
 }
 
 int port_adc(int pin) {
@@ -501,65 +549,271 @@ double port_temperature(void) {
 }
 
 void port_pins_list(void) {
-    printf("GPIO 0-27 on the header; 14 and 15 are the serial console; 47 is the LED\n");
-    for (int pin = 0; pin < 64; pin++)
-        if (pins_used & (1ull << pin))
-            printf("  GPIO%d: %d\n", pin, gpio_read(pin));
+    static const char *const names[] = {"", "in", "out", "in up", "in down"};
+    for (int row = 0; row < PIN_COUNT / 4; ++row) {
+        for (int col = 0; col < 4; ++col) {
+            int pin = col * (PIN_COUNT / 4) + row;
+            char what[24];
+            if (pin == 14 || pin == 15)
+                snprintf(what, sizeof what, "%s %s", com_open ? "COM1" : "console", pin == 14 ? "TX" : "RX");
+            else if (pin_use[pin] == COM)
+                snprintf(what, sizeof what, "COM1 %s", pin == 16 ? "CTS" : "RTS");
+            else if (pin_use[pin] == UNUSED)
+                snprintf(what, sizeof what, "free");
+            else if (pin_use[pin] == PWM) {
+                char text[16];
+                snprintf(what, sizeof what, "PWM %sHz", freq_text(pwm_freq[pwm_channel(pin)], text, sizeof text));
+            } else if (pin_use[pin] == I2C)
+                snprintf(what, sizeof what, "I2C%d %s", pin / 2, pin & 1 ? "SCL" : "SDA");
+            else if (pin_use[pin] == SPI)
+                snprintf(what, sizeof what, "SPI0 %s", pin == 11 ? "SCK" : pin == 10 ? "MOSI" : "MISO");
+            else
+                snprintf(what, sizeof what, "%s %d", names[pin_use[pin]], gpio_read(pin));
+            printf("GPIO%-2d %-14s%s", pin, what, col < 3 ? " " : "\n");
+        }
+    }
+    printf("GPIO47 (LED)   %s\n", pin_use[LED_PIN] ? (gpio_read(LED_PIN) ? "off" : "on") : "free");
 }
 
 void port_pins_reset(void) {
-    for (int pin = 0; pin < PIN_COUNT; pin++)
-        if (pins_used & (1ull << pin)) {
-            gpio_function(pin, GPIO_IN);
-            gpio_pull(pin, GPIO_PULL_NONE);
-        }
-    if (pins_used & (1ull << LED_PIN))
-        gpio_write(LED_PIN, 1);  // off
-    pins_used = 0;
     port_i2c_close();
     port_spi_close();
     port_serial_close();
+    for (int pin = 0; pin < PIN_COUNT; pin++) {
+        if (pin_use[pin] == UNUSED)
+            continue;
+        if (pin_use[pin] == PWM)
+            pwm_set(pin, 0, 0);
+        gpio_function(pin, GPIO_IN);
+        gpio_pull(pin, GPIO_PULL_NONE);
+        pin_use[pin] = UNUSED;
+    }
+    if (pin_use[LED_PIN])
+        gpio_write(LED_PIN, 1);  // off
+    pin_use[LED_PIN] = UNUSED;
 }
 
-// ---- Serial port, I2C and SPI (step 4) -------------------------------------------------
+// ---- I2C and SPI (pins.c) ------------------------------------------------------------
+// I2C0 is SDA GPIO0, SCL GPIO1 (the HAT EEPROM pins, 27 and 28 on the
+// header); I2C1 is SDA GPIO2, SCL GPIO3 (pins 3 and 5). SPI0 is SCK GPIO11,
+// MOSI GPIO10, MISO GPIO9 (pins 23, 19 and 21); chip selects are PIN's.
+
+static int i2c_bus = -1;  ///< 0 or 1 while open
+static bool spi_open;
+
+/// A write kept for the read that follows it (nostop): sent with a
+/// repeated start between them.
+static uint8_t i2c_pending[16];
+static int i2c_pending_n, i2c_pending_addr = -1;
+
+/// Why a pin can't be taken, or NULL.
+static const char *pin_free(int pin) {
+    const char *why = port_pin_reserved(pin);
+    if (why)
+        return why;
+    if (pin_use[pin] != UNUSED)
+        return "a pin is in use by PINMODE/PIN/PWM";
+    return NULL;
+}
+
+/// Sends a write kept back for a read; its result.
+static int i2c_flush(void) {
+    if (i2c_pending_addr < 0)
+        return 0;
+    int r = i2c_write_bytes(i2c_pending_addr, i2c_pending, i2c_pending_n);
+    i2c_pending_addr = -1;
+    return r;
+}
+
+const char *port_i2c_open(int sda, int scl, int khz) {
+    port_i2c_close();
+    if (!((sda == 0 && scl == 1) || (sda == 2 && scl == 3)))
+        return "I2C is SDA GPIO2, SCL GPIO3 (or SDA GPIO0, SCL GPIO1)";
+    const char *why = pin_free(sda);
+    if (!why)
+        why = pin_free(scl);
+    if (why)
+        return why;
+    if (khz < 10 || khz > 1000)
+        return "the speed must be 10-1000 kHz";
+    i2c_bus = sda / 2;
+    i2c_init(i2c_bus, (unsigned)khz);
+    gpio_function(sda, GPIO_ALT0);
+    gpio_function(scl, GPIO_ALT0);
+    gpio_pull(sda, GPIO_PULL_UP);  // GPIO2/3 have 1.8k pull-ups on the board too
+    gpio_pull(scl, GPIO_PULL_UP);
+    pin_use[sda] = pin_use[scl] = I2C;
+    return NULL;
+}
+
+void port_i2c_close(void) {
+    if (i2c_bus < 0)
+        return;
+    i2c_flush();
+    i2c_deinit();
+    for (int pin = i2c_bus * 2; pin <= i2c_bus * 2 + 1; pin++) {
+        gpio_function(pin, GPIO_IN);
+        gpio_pull(pin, GPIO_PULL_NONE);
+        pin_use[pin] = UNUSED;
+    }
+    i2c_bus = -1;
+}
+
+int port_i2c_write(int addr, const uint8_t *data, int n, bool nostop) {
+    if (i2c_bus < 0)
+        return -2;
+    i2c_flush();
+    if (nostop && n <= (int)sizeof i2c_pending) {
+        // Kept until the read: the BSC makes a repeated start only when the
+        // read is started while the write is under way.
+        memcpy(i2c_pending, data, (size_t)n);
+        i2c_pending_n = n;
+        i2c_pending_addr = addr;
+        return n;
+    }
+    return i2c_write_bytes(addr, data, n);
+}
+
+int port_i2c_read(int addr, uint8_t *data, int n) {
+    if (i2c_bus < 0)
+        return -2;
+    if (i2c_pending_addr >= 0 && i2c_pending_addr != addr)
+        i2c_flush();
+    int nw = i2c_pending_addr == addr ? i2c_pending_n : 0;
+    i2c_pending_addr = -1;
+    return i2c_read_bytes(addr, i2c_pending, nw, data, n);
+}
+
+const char *port_spi_open(int sck, int mosi, int miso, int khz, int mode) {
+    port_spi_close();
+    if (sck == 11 && mosi == 12 && miso == 9)
+        mosi = 10;  // SPI OPEN's defaults (basic.c puts MOSI after SCK, as on the Pico)
+    if (sck != 11 || mosi != 10 || miso != 9)
+        return "SPI is SCK GPIO11, MOSI GPIO10, MISO GPIO9";
+    const char *why = pin_free(sck);
+    if (!why)
+        why = pin_free(mosi);
+    if (!why)
+        why = pin_free(miso);
+    if (why)
+        return why;
+    if (khz < 1 || khz > 50000 || mode < 0 || mode > 3)
+        return "the speed must be 1-50000 kHz and the mode 0-3";
+    spi_init((unsigned)khz, mode);
+    for (int pin = 9; pin <= 11; pin++) {
+        gpio_function(pin, GPIO_ALT0);
+        pin_use[pin] = SPI;
+    }
+    spi_open = true;
+    return NULL;
+}
+
+void port_spi_close(void) {
+    if (!spi_open)
+        return;
+    for (int pin = 9; pin <= 11; pin++) {
+        gpio_function(pin, GPIO_IN);
+        gpio_pull(pin, GPIO_PULL_NONE);
+        pin_use[pin] = UNUSED;
+    }
+    spi_open = false;
+}
+
+bool port_spi_transfer(const uint8_t *out, uint8_t *in, int n) {
+    if (!spi_open)
+        return false;
+    return spi_xfer(out, in, n);
+}
+
+static void pin_release(int pin) {
+    if (pin_use[pin] == PWM)
+        port_pwm(pin, 0, 0);
+    else if (pin_use[pin] == I2C)
+        port_i2c_close();
+    else if (pin_use[pin] == SPI)
+        port_spi_close();
+    else if (pin_use[pin] == COM)
+        port_serial_flow(false);
+}
+
+// ---- Serial port (COM1): the console's PL011 and pins, lent while open --------------
+// GPIO14 TX and GPIO15 RX (pins 8 and 10), RTS/CTS on GPIO17/16 (pins 11
+// and 36). The serial console stops while COM1 is open: the HDMI screen and
+// the USB keyboard go on.
+
+static bool com_flow;
 
 const char *port_serial_open(unsigned baud, int data_bits, char parity, int stop_bits, int tx,
                              int rx) {
-    (void)baud, (void)data_bits, (void)parity, (void)stop_bits, (void)tx, (void)rx;
-    return NOT_YET;
+    if (tx != 14 || rx != 15)
+        return "COM1 is TX GPIO14, RX GPIO15 (the serial console's pins)";
+    if (!usb_keyboard_present())
+        return "COM1 takes the serial console's pins: it needs a USB keyboard";
+    if (baud < 300 || baud > 3000000)
+        return "the speed must be 300-3000000";
+    if (com_open)
+        port_serial_close();
+    fflush(stdout);
+    uart_com_open(baud, data_bits, parity, stop_bits);
+    com_open = true;
+    return NULL;
 }
-const char *port_serial_flow(bool on) {
-    (void)on;
-    return NOT_YET;
-}
-void port_serial_break(unsigned ms) { (void)ms; }
-void port_serial_close(void) {}
-void port_serial_write(const char *data, int n) { (void)data, (void)n; }
-int port_serial_getc(void) { return -1; }
-int port_serial_waiting(void) { return 0; }
-int port_serial_room(void) { return 0; }
 
-const char *port_i2c_open(int sda, int scl, int khz) {
-    (void)sda, (void)scl, (void)khz;
-    return NOT_YET;
+const char *port_serial_flow(bool on) {
+    if (!com_open)
+        return "COM1 isn't open";
+    if (on && !com_flow) {
+        const char *why = pin_free(16);
+        if (!why)
+            why = pin_free(17);
+        if (why)
+            return why;
+    }
+    uart_com_flow(on);
+    if (on)
+        pin_use[16] = pin_use[17] = COM;
+    if (!on && com_flow) {
+        for (int pin = 16; pin <= 17; pin++) {
+            gpio_function(pin, GPIO_IN);
+            gpio_pull(pin, GPIO_PULL_NONE);
+            pin_use[pin] = UNUSED;
+        }
+    }
+    com_flow = on;
+    return NULL;
 }
-void port_i2c_close(void) {}
-int port_i2c_write(int addr, const uint8_t *data, int n, bool nostop) {
-    (void)addr, (void)data, (void)n, (void)nostop;
-    return -2;
+
+void port_serial_break(unsigned ms) {
+    if (!com_open)
+        return;
+    uart_com_break(true);
+    port_sleep_ms(ms);
+    uart_com_break(false);
 }
-int port_i2c_read(int addr, uint8_t *data, int n) {
-    (void)addr, (void)data, (void)n;
-    return -2;
+
+void port_serial_close(void) {
+    if (!com_open)
+        return;
+    port_serial_flow(false);
+    uart_com_close();
+    com_open = false;
 }
-const char *port_spi_open(int sck, int mosi, int miso, int khz, int mode) {
-    (void)sck, (void)mosi, (void)miso, (void)khz, (void)mode;
-    return NOT_YET;
+
+void port_serial_write(const char *data, int n) {
+    if (com_open)
+        uart_com_write(data, n);
 }
-void port_spi_close(void) {}
-bool port_spi_transfer(const uint8_t *out, uint8_t *in, int n) {
-    (void)out, (void)in, (void)n;
-    return false;
+
+int port_serial_getc(void) {
+    return com_open ? uart_com_getc() : -1;
+}
+
+int port_serial_waiting(void) {
+    return com_open ? uart_com_waiting() : 0;
+}
+
+int port_serial_room(void) {
+    return com_open ? uart_com_room() : 0;
 }
 
 // ---- XMODEM, YMODEM and ZMODEM on the console ------------------------------------------

@@ -17,8 +17,8 @@ This build is GPLv3, because the USB keyboard comes from the USPi library.
    interpreter's screen features and pico-os's text console, and USPi for
    the keyboard and mouse. Text goes to both HDMI and serial, and keys come
    from either one.
-4. **Sound and hardware commands**: BEEP, SOUND, PLAY and MUSIC over HDMI
-   (done, waiting for a test on the board); PWM, SPI, I2C and COM1 next.
+4. **Sound and hardware commands** (done, waiting for a test on the board):
+   BEEP, SOUND, PLAY and MUSIC over HDMI; PWM, I2C, SPI and COM1.
 
 Wi-Fi comes later.
 
@@ -89,15 +89,27 @@ with these differences:
 - **`EDIT`** opens the full-screen editor, on both.
 - **Pins:** `PIN` and `PIN MODE` work on GPIO 0-27 of the header (14 and 15
   are the console). `PIN LED` is the green ACT LED (GPIO47). `TEMP()` is the
-  SoC temperature.
+  SoC temperature. `PINS` shows what each pin is doing.
+- **PWM** works on GPIO12 and 13 (header pins 32 and 33) and GPIO18 and 19
+  (pins 12 and 35). 12 and 18 share one channel, and 13 and 19 the other,
+  so a pair runs at one frequency.
+- **I2C** is SDA GPIO2, SCL GPIO3 (pins 3 and 5), the default for
+  `I2C OPEN`. GPIO0/1 (pins 27 and 28) are the second bus. A write with
+  `NOSTOP` followed by a read is sent with a repeated start between them.
+- **SPI** is SPI0: SCK GPIO11, MOSI GPIO10, MISO GPIO9 (pins 23, 19 and 21),
+  the default for `SPI OPEN`. Drive the chip select yourself with `PIN`
+  (GPIO8 and 7 are the usual ones).
+- **COM1** borrows the serial console's UART and pins, GPIO14 TX and GPIO15
+  RX (pins 8 and 10). While it is open, the serial console stops (the HDMI
+  screen and the USB keyboard go on), and `CLOSE` gives it back. It needs a
+  USB keyboard. RTS/CTS flow control is on GPIO17/16 (pins 11 and 36).
 - **Sound** comes out of the HDMI monitor's or TV's speakers: `BEEP`,
   `SOUND`, `PLAY` and `MUSIC` (MOD and XM songs, with pico-os's players).
   This needs `hdmi_drive=2` in `config.txt` (it is in this repo's), so the
   firmware runs the link as HDMI, not DVI. The banner's `Sound:` line says
   if there is none (a DVI monitor, or one without speakers): then the
   commands run silently.
-- **Not yet:** `PWM`, `I2C`, `SPI` and `COM1`.
-  The Pi has no ADC (`ADC()` gives -1) and no PIO (no `NEOPIXEL`). Wi-Fi
+- The Pi has no ADC (`ADC()` gives -1) and no PIO (no `NEOPIXEL`). Wi-Fi
   comes later.
 - The Pi has no clock that keeps time while it is off: `DATE$` and `TIME$`
   start at 1 Jan 1970 until a program sets them.
@@ -112,6 +124,7 @@ with these differences:
 | `src/rpi/` | BCM2835 drivers: GPIO, system timer, UART, mailbox, MMU, reset, faults, newlib syscalls |
 | `src/rpi/emmc.c` | the SD card slot (the EMMC controller) |
 | `src/sd_disk.c` | FatFs's disk functions on the card, and its clock |
+| `src/rpi/pins.c` | PWM, I2C (BSC) and SPI0 |
 | `src/rpi/fb.c` | the HDMI framebuffer (640x480, RGB332 palette) |
 | `src/rpi/hdmi_sound.c` | sound over HDMI: 48 kHz stereo into the HDMI audio FIFO by DMA (after Circle's driver, GPLv3) |
 | `src/audio.c` | the sound mixer: tones, PLAY's queue and the music, as in pico-os |
