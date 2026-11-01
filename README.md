@@ -89,7 +89,7 @@ with these differences:
 - **`EDIT`** opens the full-screen editor, on both.
 - **Pins:** `PIN` and `PIN MODE` work on GPIO 0-27 of the header (14 and 15
   are the console). `PIN LED` is the green ACT LED (GPIO47). `TEMP()` is the
-  SoC temperature. `PINS` shows what each pin is doing.
+  SoC temperature. `PINS` draws the board and its 40-pin header, with what each pin is doing.
 - **PWM** works on GPIO12 and 13 (header pins 32 and 33) and GPIO18 and 19
   (pins 12 and 35). 12 and 18 share one channel, and 13 and 19 the other,
   so a pair runs at one frequency.

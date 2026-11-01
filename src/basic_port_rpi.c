@@ -548,31 +548,80 @@ double port_temperature(void) {
     return mbox_temperature() / 1000.0;
 }
 
-void port_pins_list(void) {
+/// What a header GPIO is doing, for PINS: "free", "out 1", "I2C1 SDA" and so on.
+static void pin_what(int pin, char *what, size_t n) {
     static const char *const names[] = {"", "in", "out", "in up", "in down"};
-    for (int row = 0; row < PIN_COUNT / 4; ++row) {
-        for (int col = 0; col < 4; ++col) {
-            int pin = col * (PIN_COUNT / 4) + row;
-            char what[24];
-            if (pin == 14 || pin == 15)
-                snprintf(what, sizeof what, "%s %s", com_open ? "COM1" : "console", pin == 14 ? "TX" : "RX");
-            else if (pin_use[pin] == COM)
-                snprintf(what, sizeof what, "COM1 %s", pin == 16 ? "CTS" : "RTS");
-            else if (pin_use[pin] == UNUSED)
-                snprintf(what, sizeof what, "free");
-            else if (pin_use[pin] == PWM) {
-                char text[16];
-                snprintf(what, sizeof what, "PWM %sHz", freq_text(pwm_freq[pwm_channel(pin)], text, sizeof text));
-            } else if (pin_use[pin] == I2C)
-                snprintf(what, sizeof what, "I2C%d %s", pin / 2, pin & 1 ? "SCL" : "SDA");
-            else if (pin_use[pin] == SPI)
-                snprintf(what, sizeof what, "SPI0 %s", pin == 11 ? "SCK" : pin == 10 ? "MOSI" : "MISO");
-            else
-                snprintf(what, sizeof what, "%s %d", names[pin_use[pin]], gpio_read(pin));
-            printf("GPIO%-2d %-14s%s", pin, what, col < 3 ? " " : "\n");
-        }
+    if (pin == 14 || pin == 15)
+        snprintf(what, n, "%s %s", com_open ? "COM1" : "console", pin == 14 ? "TX" : "RX");
+    else if (pin_use[pin] == COM)
+        snprintf(what, n, "COM1 %s", pin == 16 ? "CTS" : "RTS");
+    else if (pin_use[pin] == UNUSED)
+        snprintf(what, n, "free");
+    else if (pin_use[pin] == PWM) {
+        char text[16];
+        snprintf(what, n, "PWM %sHz", freq_text(pwm_freq[pwm_channel(pin)], text, sizeof text));
+    } else if (pin_use[pin] == I2C)
+        snprintf(what, n, "I2C%d %s", pin / 2, pin & 1 ? "SCL" : "SDA");
+    else if (pin_use[pin] == SPI)
+        snprintf(what, n, "SPI0 %s", pin == 11 ? "SCK" : pin == 10 ? "MOSI" : "MISO");
+    else
+        snprintf(what, n, "%s %d", names[pin_use[pin]], gpio_read(pin));
+}
+
+// The 40-pin header, physical pin 1 to 40: a GPIO number, or one of these.
+enum { HDR_3V3 = -1, HDR_5V = -2, HDR_GND = -3 };
+static const signed char header[40] = {
+    HDR_3V3, HDR_5V, 2, HDR_5V, 3, HDR_GND, 4, 14, HDR_GND, 15,
+    17, 18, 27, HDR_GND, 22, 23, HDR_3V3, 24, 10, HDR_GND,
+    9, 25, 11, 8, HDR_GND, 7, 0, 1, 5, HDR_GND,
+    6, 12, 13, HDR_GND, 19, 16, 26, 20, HDR_GND, 21,
+};
+
+/// A header pin's mark in the drawing: o free, * in use, + power, - ground.
+static char pin_mark(int phys) {
+    int g = header[phys - 1];
+    if (g == HDR_GND)
+        return '-';
+    if (g < 0)
+        return '+';
+    return g == 14 || g == 15 || pin_use[g] != UNUSED ? '*' : 'o';
+}
+
+/// "GPIO17" or "3V3" for a header pin.
+static const char *pin_name(int phys, char *out, size_t n) {
+    int g = header[phys - 1];
+    snprintf(out, n, "%s", g == HDR_3V3 ? "3V3" : g == HDR_5V ? "5V" : g == HDR_GND ? "GND" : "");
+    if (g >= 0)
+        snprintf(out, n, "GPIO%d", g);
+    return out;
+}
+
+void port_pins_list(void) {
+    // The board from above, header along the top edge, pin 1 at the SD end.
+    char row[2][41];
+    for (int i = 0; i < 20; i++) {
+        row[0][i * 2] = pin_mark(i * 2 + 2), row[0][i * 2 + 1] = ' ';
+        row[1][i * 2] = pin_mark(i * 2 + 1), row[1][i * 2 + 1] = ' ';
     }
-    printf("GPIO47 (LED)   %s\n", pin_use[LED_PIN] ? (gpio_read(LED_PIN) ? "off" : "on") : "free");
+    row[0][39] = row[1][39] = '\0';
+    printf("  .-------------------------------------------------------------.\n");
+    printf("  |    2 [%s] 40           |\n", row[0]);
+    printf("  |    1 [%s] 39           |\n", row[1]);
+    printf("  |SD                                         Pi Zero W     CAM |\n");
+    printf("  '-----[mini HDMI]------------------------[USB]--[PWR]---------'\n\n");
+
+    // The header pin by pin, as you'd see it with the SD card at the top.
+    for (int phys = 1; phys < 40; phys += 2) {
+        char lname[8], rname[8], lwhat[24] = "", rwhat[24] = "";
+        if (header[phys - 1] >= 0)
+            pin_what(header[phys - 1], lwhat, sizeof lwhat);
+        if (header[phys] >= 0)
+            pin_what(header[phys], rwhat, sizeof rwhat);
+        printf("%14.14s %6s %2d [%c %c] %-2d %-6s %.14s\n", lwhat, pin_name(phys, lname, sizeof lname), phys,
+               pin_mark(phys), pin_mark(phys + 1), phys + 1, pin_name(phys + 1, rname, sizeof rname), rwhat);
+    }
+    printf("o free  * in use  + power  - ground      GPIO47 (LED) %s\n",
+           pin_use[LED_PIN] ? (gpio_read(LED_PIN) ? "off" : "on") : "free");
 }
 
 void port_pins_reset(void) {
