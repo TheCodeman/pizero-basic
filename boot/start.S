@@ -92,9 +92,19 @@ pabort_entry:   FAULT 2, 4
 dabort_entry:   FAULT 3, 8
 fiq_entry:      FAULT 5, 4
 
-/* IRQ: save what C may clobber, call irq_handler(), return. */
+/* IRQ: save what C may clobber (the VFP's caller-saved registers too:
+ * the interrupted code may be in the middle of floating point), call
+ * irq_handler(), return. 6 + 16 + 2 words keep the stack 8-byte aligned. */
 irq_entry:
     sub     lr, lr, #4
     stmfd   sp!, {r0-r3, r12, lr}
+    vpush   {d0-d7}
+    vmrs    r0, fpscr
+    sub     sp, sp, #4
+    push    {r0}
     bl      irq_handler
+    pop     {r0}
+    add     sp, sp, #4
+    vmsr    fpscr, r0
+    vpop    {d0-d7}
     ldmfd   sp!, {r0-r3, r12, pc}^

@@ -57,5 +57,3 @@ void fault_report(int kind, const uint32_t *regs, uint32_t pc) {
         __asm volatile("wfi");
 }
 
-/// IRQs: nothing turns them on yet (step 3's USB will).
-__attribute__((weak)) void irq_handler(void) {}

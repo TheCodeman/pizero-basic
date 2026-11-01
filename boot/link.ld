@@ -48,6 +48,7 @@ SECTIONS
     /* Stacks: SVC (where BASIC runs; its evaluator recurses), then small
      * ones for the exception modes. */
     .stack (NOLOAD) : ALIGN(16) {
+        __svc_stack_bottom = .;
         . += 0x80000;               /* 512 KB */
         __svc_stack_top = .;
         . += 0x4000;

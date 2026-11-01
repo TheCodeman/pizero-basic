@@ -62,6 +62,15 @@ void uart_init(unsigned baud);
 void uart_putc(char c);
 /// The next byte received, or -1 if none is waiting.
 int uart_getc(void);
+/// Receives by interrupt from now on (into a 4 KB ring). Needs irq_init.
+void uart_enable_irq(void);
+/// UART0's interrupt (irq.c calls it).
+void uart_irq(void);
+
+// ---- interrupts (irq.c) -----------------------------------------------------------------
+
+/// Turns IRQs on at the ARM.
+void irq_init(void);
 
 // ---- mailbox to the VideoCore firmware (mailbox.c) --------------------------------
 
