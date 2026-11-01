@@ -19,8 +19,10 @@ This build is GPLv3, because the USB keyboard comes from the USPi library.
    from either one.
 4. **Sound and hardware commands** (done, waiting for a test on the board):
    BEEP, SOUND, PLAY and MUSIC over HDMI; PWM, I2C, SPI and COM1.
-
-Wi-Fi comes later.
+5. **Wi-Fi** (under way): the SD card moved to the SDHOST controller (done),
+   then the Wi-Fi chip on EMMC: its firmware and `WIFI SCAN` (waiting for a
+   test on the board). Joining a network (WPA2), lwIP and DHCP, then NTP and
+   MQTT, come next.
 
 ## Building
 
@@ -46,6 +48,13 @@ Format a card as FAT32 and copy these files to it:
   [raspberrypi/firmware](https://github.com/raspberrypi/firmware/tree/master/boot)
 - `sdcard/config.txt` from this repo
 - `build/kernel.img`
+- for Wi-Fi, a `firmware` folder with the Wi-Fi chip's three files, named
+  as below, from
+  [RPi-Distro/firmware-nonfree](https://github.com/RPi-Distro/firmware-nonfree/tree/c9d3ae6584ab79d19a4f94ccf701e888f9f87a53/debian/config/brcm80211)
+  (Raspberry Pi OS has the same files in `/lib/firmware/brcm/`):
+  - `firmware/brcmfmac43430-sdio.bin` (from `cypress/cyfmac43430-sdio.bin`)
+  - `firmware/brcmfmac43430-sdio.txt` (from `brcm/brcmfmac43430-sdio.txt`)
+  - `firmware/brcmfmac43430-sdio.clm_blob` (from `cypress/cyfmac43430-sdio.clm_blob`)
 
 ## The serial console
 
@@ -109,8 +118,12 @@ with these differences:
   firmware runs the link as HDMI, not DVI. The banner's `Sound:` line says
   if there is none (a DVI monitor, or one without speakers): then the
   commands run silently.
-- The Pi has no ADC (`ADC()` gives -1) and no PIO (no `NEOPIXEL`). Wi-Fi
-  comes later.
+- **Wi-Fi:** `WIFI ON` starts the chip (loading its firmware from
+  `SD:/firmware/` takes a second or two), `WIFI` says its state and MAC
+  address, `WIFI SCAN` lists the networks around (it starts the chip if it
+  is off; Esc stops it) and `WIFI OFF` stops it. Joining a network is still
+  to come. `WIFI_COUNTRY` in `BASIC.CFG` sets the radio's country.
+- The Pi has no ADC (`ADC()` gives -1) and no PIO (no `NEOPIXEL`).
 - The Pi has no clock that keeps time while it is off: `DATE$` and `TIME$`
   start at 1 Jan 1970 until a program sets them.
 - **Memory:** about 450 MB for BASIC.
@@ -124,6 +137,8 @@ with these differences:
 | `src/rpi/` | BCM2835 drivers: GPIO, system timer, UART, mailbox, MMU, reset, faults, newlib syscalls |
 | `src/rpi/sdhost.c` | the SD card slot (the SDHOST controller; EMMC is left for the Wi-Fi chip) |
 | `src/sd_disk.c` | FatFs's disk functions on the card, and its clock |
+| `src/rpi/sdio.c` | SDIO on the EMMC controller, wired to the Wi-Fi chip |
+| `src/rpi/wlan.c` | the Wi-Fi chip (CYW43430): bring-up, firmware, commands, events and scanning (after Richard Miller's ether4330.c for Plan 9) |
 | `src/rpi/pins.c` | PWM, I2C (BSC) and SPI0 |
 | `src/rpi/fb.c` | the HDMI framebuffer (640x480, RGB332 palette) |
 | `src/rpi/hdmi_sound.c` | sound over HDMI: 48 kHz stereo into the HDMI audio FIFO by DMA (after Circle's driver, GPLv3) |
