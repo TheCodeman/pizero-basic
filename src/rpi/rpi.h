@@ -66,6 +66,17 @@ int uart_getc(void);
 void uart_enable_irq(void);
 /// UART0's interrupt (main connects it).
 void uart_irq(void *unused);
+/// COM1: the PL011 lent to BASIC. While open, the console's uart_putc and
+/// uart_getc do nothing; close puts the console back (115200 8N1).
+void uart_com_open(unsigned baud, int data_bits, char parity, int stop_bits);
+void uart_com_close(void);
+/// RTS/CTS on GPIO17/16.
+void uart_com_flow(bool on);
+void uart_com_break(bool on);
+void uart_com_write(const char *data, int n);
+int uart_com_getc(void);
+int uart_com_waiting(void);
+int uart_com_room(void);
 
 // ---- interrupts (irq.c) -----------------------------------------------------------------
 
@@ -104,3 +115,23 @@ void dcache_clean_invalidate(const void *addr, size_t len);
 
 /// Restarts the board through the PM watchdog.
 void board_reboot(void) __attribute__((noreturn));
+
+// ---- PWM, I2C and SPI0 (pins.c) -----------------------------------------------------
+
+/// The PWM channel on a pin (0 on GPIO12 and 18, 1 on 13 and 19), or -1.
+int pwm_channel(int pin);
+/// PWM on `pin` at `freq` Hz (0: off) and duty 0-100%; the pin's channel is
+/// shared with its partner. Returns the frequency it runs at.
+double pwm_set(int pin, double freq, double duty);
+/// Opens I2C bus 0 (GPIO0/1) or 1 (GPIO2/3) at `khz`.
+bool i2c_init(int bus, unsigned khz);
+void i2c_deinit(void);
+/// Writes n bytes to device addr: n, -1 if no answer, -2 if not open.
+int i2c_write_bytes(int addr, const uint8_t *data, int n);
+/// Writes nw bytes (0-16), then with a repeated start reads n: n, -1 or -2.
+int i2c_read_bytes(int addr, const uint8_t *wr, int nw, uint8_t *data, int n);
+/// Sets SPI0 to `khz` (rounded down) and mode 0-3; returns the kHz it runs at.
+unsigned spi_init(unsigned khz, int mode);
+/// Sends n bytes from out (NULL: zeros) and keeps those received in in (may
+/// be NULL). False if it timed out.
+bool spi_xfer(const uint8_t *out, uint8_t *in, int n);

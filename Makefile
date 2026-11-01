@@ -17,7 +17,8 @@ ARCH    := -mcpu=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard -marm
 CFLAGS  := $(ARCH) -O2 -g -std=gnu11 -Wall -Wextra -ffunction-sections -fdata-sections \
            -fno-common -Isrc -Isrc/basic -Isrc/fatfs -Isrc/compat -Isrc/screen \
            -Ilib/uspi/include -DPIZERO=1 -DPICO_BASIC_EDITOR=1 -DPICO_BASIC_WIFI=0 \
-           -DCONFIG_PATH='"SD:/BASIC.CFG"'
+           -DCONFIG_PATH='"SD:/BASIC.CFG"' -DCOM1_TX_DEFAULT=14 \
+           -DI2C_SDA_DEFAULT=2 -DSPI_SCK_DEFAULT=11
 # The shared pico-basic sources are kept as they are upstream: quieter there.
 SHARED_CFLAGS := -Wno-unused-parameter -Wno-format-truncation -Wno-unused-function -Wno-sign-compare -Wno-missing-field-initializers
 ASFLAGS := $(ARCH) -g
