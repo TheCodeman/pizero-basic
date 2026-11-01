@@ -13,12 +13,12 @@
 #include "board_watchdog.h"
 #include "ff.h"
 #include "diskio.h"
-#include "rpi/emmc.h"
+#include "rpi/sdcard.h"
 
 static FATFS fs;
 
 const char *sd_disk_mount(void) {
-    const char *err = emmc_init();
+    const char *err = sdcard_init();
     if (err)
         return err;
     FRESULT r = f_mount(&fs, "SD:", 1);
@@ -38,14 +38,14 @@ void sd_disk_space(uint32_t *total_kb, uint32_t *free_kb) {
 }
 
 DSTATUS disk_status(BYTE pdrv) {
-    return pdrv == 0 && emmc_ready() ? 0 : STA_NOINIT;
+    return pdrv == 0 && sdcard_ready() ? 0 : STA_NOINIT;
 }
 
 DSTATUS disk_initialize(BYTE pdrv) {
     if (pdrv != 0)
         return STA_NOINIT;
-    // emmc_init has run (sd_disk_mount); a card swapped since needs it again
-    if (!emmc_ready() && emmc_init())
+    // sdcard_init has run (sd_disk_mount); a card swapped since needs it again
+    if (!sdcard_ready() && sdcard_init())
         return STA_NOINIT;
     return 0;
 }
@@ -54,14 +54,14 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count) {
     board_watchdog_feed();  // a long file operation isn't a hang
     if (pdrv != 0)
         return RES_PARERR;
-    return emmc_read(buff, (uint32_t)sector, count) ? RES_OK : RES_ERROR;
+    return sdcard_read(buff, (uint32_t)sector, count) ? RES_OK : RES_ERROR;
 }
 
 DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count) {
     board_watchdog_feed();
     if (pdrv != 0)
         return RES_PARERR;
-    return emmc_write(buff, (uint32_t)sector, count) ? RES_OK : RES_ERROR;
+    return sdcard_write(buff, (uint32_t)sector, count) ? RES_OK : RES_ERROR;
 }
 
 DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void *buff) {
@@ -69,9 +69,9 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void *buff) {
         return RES_PARERR;
     switch (cmd) {
     case CTRL_SYNC:
-        return RES_OK;  // writes are done when emmc_write returns
+        return RES_OK;  // writes are done when sdcard_write returns
     case GET_SECTOR_COUNT:
-        *(LBA_t *)buff = emmc_sectors();
+        *(LBA_t *)buff = sdcard_sectors();
         return RES_OK;
     case GET_SECTOR_SIZE:
         *(WORD *)buff = 512;

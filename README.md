@@ -122,7 +122,7 @@ with these differences:
 | `boot/start.S` | the entry point: stacks, vectors, VFP, BSS |
 | `boot/link.ld` | loads at 0x8000; the stacks, then the heap up to the top of the ARM's RAM |
 | `src/rpi/` | BCM2835 drivers: GPIO, system timer, UART, mailbox, MMU, reset, faults, newlib syscalls |
-| `src/rpi/emmc.c` | the SD card slot (the EMMC controller) |
+| `src/rpi/sdhost.c` | the SD card slot (the SDHOST controller; EMMC is left for the Wi-Fi chip) |
 | `src/sd_disk.c` | FatFs's disk functions on the card, and its clock |
 | `src/rpi/pins.c` | PWM, I2C (BSC) and SPI0 |
 | `src/rpi/fb.c` | the HDMI framebuffer (640x480, RGB332 palette) |

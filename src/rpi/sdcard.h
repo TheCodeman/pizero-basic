@@ -1,6 +1,6 @@
 /**
- * @file emmc.h
- * @brief The SD card slot (emmc.c).
+ * @file sdcard.h
+ * @brief The SD card slot (sdhost.c: the SDHOST controller).
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -9,11 +9,11 @@
 #include <stdint.h>
 
 /// Finds and sets up the card: NULL, or what went wrong ("none": no card).
-const char *emmc_init(void);
+const char *sdcard_init(void);
 /// The card was set up.
-bool emmc_ready(void);
+bool sdcard_ready(void);
 /// Its size in 512-byte sectors.
-uint32_t emmc_sectors(void);
+uint32_t sdcard_sectors(void);
 /// Reads or writes `count` 512-byte sectors; false on an error.
-bool emmc_read(uint8_t *buf, uint32_t sector, uint32_t count);
-bool emmc_write(const uint8_t *buf, uint32_t sector, uint32_t count);
+bool sdcard_read(uint8_t *buf, uint32_t sector, uint32_t count);
+bool sdcard_write(const uint8_t *buf, uint32_t sector, uint32_t count);
