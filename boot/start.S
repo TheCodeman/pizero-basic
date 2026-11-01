@@ -42,8 +42,11 @@ _start:
     mcr     p15, 0, r0, c7, c5, 4   /* flush prefetch buffer (ISB) */
     mov     r0, #0x40000000
     fmxr    fpexc, r0
-    /* Flush-to-zero and default NaN off: plain IEEE. */
-    mov     r0, #0
+    /* RunFast mode: flush-to-zero and default NaN on, exception traps off.
+     * Without it the ARM1176's VFP11 hands some operations (NaN or
+     * denormal operands) to support code we don't have, as an undefined
+     * instruction on the next VFP instruction. QEMU doesn't do that. */
+    mov     r0, #(3 << 24)
     fmxr    fpscr, r0
 
     /* Clear the BSS. */
