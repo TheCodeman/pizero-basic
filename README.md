@@ -13,9 +13,10 @@ This build is GPLv3, because the USB keyboard comes from the USPi library.
    the full ARM clock, the PL011 serial console and newlib.
 2. **BASIC on the SD card** (done): `basic.c`, FatFs, the editors and XMODEM
    on a new `basic_port_rpi.c`, with the SD card (EMMC controller) as the drive.
-3. **HDMI and USB keyboard**: a 640x480 mailbox framebuffer with the
-   interpreter's screen features, and USPi for the keyboard. Text goes to
-   both HDMI and serial, and keys come from either one.
+3. **HDMI and USB keyboard** (done): a 640x480 framebuffer with the
+   interpreter's screen features and pico-os's text console, and USPi for
+   the keyboard and mouse. Text goes to both HDMI and serial, and keys come
+   from either one.
 4. **Hardware commands**: PIN, PWM and sound on GPIO18, SPI, I2C, COM1,
    WATCHDOG and TEMP().
 
@@ -32,7 +33,10 @@ make build/sd.img   # a 64 MB FAT32 card image with the examples, for QEMU
 make qemu       # runs it in QEMU's raspi0 model (with build/sd.img if it's there)
 ```
 
-In QEMU, Ctrl-A X quits.
+`make qemu` opens a window with the HDMI screen and a USB keyboard; the
+serial console is on the terminal (Ctrl-A X quits).
+
+![SCREEN 12 graphics and BOXES.BAS in QEMU](docs/qemu-screen.png)
 
 ## The SD card
 
@@ -75,12 +79,19 @@ with these differences:
 - **Getting files on and off:** paste a listing at the `Ok` prompt, or use
   `XRECV` and `XSEND` (XMODEM, YMODEM, ZMODEM) as on the Pico. Or put the
   card in the PC.
-- **`EDIT`** opens the full-screen editor on the terminal.
+- **The screen and keyboard:** the HDMI screen shows the same as the serial
+  terminal (80 x 30 text), and `SCREEN`, `LINE`, `CIRCLE`, `PAINT`, pages,
+  `IMAGE` (BMP, PNG, JPEG) and `SAVEIMAGE` draw on it as on pico-os. Type on
+  either the USB keyboard (US layout) or the serial terminal. Plug the
+  keyboard into the Zero's USB socket (the one marked USB, through an OTG
+  adapter) before power-up: USB devices are found once, at start-up. A mouse
+  needs a hub for both; it has no wheel. Ctrl-Alt-Del restarts.
+- **`EDIT`** opens the full-screen editor, on both.
 - **Pins:** `PIN` and `PIN MODE` work on GPIO 0-27 of the header (14 and 15
   are the console). `PIN LED` is the green ACT LED (GPIO47). `TEMP()` is the
   SoC temperature.
-- **Not yet:** the screen (graphics, `SCREEN`, `IMAGE`, the mouse) comes in
-  step 3; `PWM`, `BEEP`/`SOUND`/`PLAY`, `I2C`, `SPI` and `COM1` in step 4.
+- **Not yet:** `PWM`, `BEEP`/`SOUND`/`PLAY`, `MUSIC`, `I2C`, `SPI` and
+  `COM1` come in step 4.
   The Pi has no ADC (`ADC()` gives -1) and no PIO (no `NEOPIXEL`). Wi-Fi
   comes later.
 - The Pi has no clock that keeps time while it is off: `DATE$` and `TIME$`
@@ -96,7 +107,12 @@ with these differences:
 | `src/rpi/` | BCM2835 drivers: GPIO, system timer, UART, mailbox, MMU, reset, faults, newlib syscalls |
 | `src/rpi/emmc.c` | the SD card slot (the EMMC controller) |
 | `src/sd_disk.c` | FatFs's disk functions on the card, and its clock |
-| `src/console.c` | the console: serial now, HDMI and keyboard from step 3 |
+| `src/rpi/fb.c` | the HDMI framebuffer (640x480, RGB332 palette) |
+| `src/rpi/ticker.c`, `src/rpi/irq.c` | the 100 Hz tick and its timers; interrupts |
+| `src/terminal.c` | the terminal: output to serial and screen, keys from both |
+| `src/usb_input.c` | the USB keyboard and mouse through USPi, and USPi's environment |
+| `src/screen/` | pico-os's text console, pictures (lodepng, TJpgDec) and sprites (MIT), as they are there |
+| `lib/uspi/` | [USPi](https://github.com/rsta2/uspi) (GPLv3), with three small changes marked "Pi Zero BASIC" |
 | `src/basic_port_rpi.c` | `basic_port.h` for the Pi: what the interpreter needs from the board |
 | `src/main.c` | board start-up, the banner, AUTORUN.BAS, BASIC's prompt |
 | `src/basic/`, `src/fatfs/`, `src/term_editor.c`, `src/xfer.c`, `src/config.c` | pico-basic's own sources (MIT), as they are there |

@@ -64,13 +64,15 @@ void uart_putc(char c);
 int uart_getc(void);
 /// Receives by interrupt from now on (into a 4 KB ring). Needs irq_init.
 void uart_enable_irq(void);
-/// UART0's interrupt (irq.c calls it).
-void uart_irq(void);
+/// UART0's interrupt (main connects it).
+void uart_irq(void *unused);
 
 // ---- interrupts (irq.c) -----------------------------------------------------------------
 
 /// Turns IRQs on at the ARM.
 void irq_init(void);
+/// Runs fn(param) for interrupt `irq` (0-63) and enables it.
+void irq_connect(unsigned irq, void (*fn)(void *), void *param);
 
 // ---- mailbox to the VideoCore firmware (mailbox.c) --------------------------------
 
@@ -91,6 +93,9 @@ uint32_t mbox_temperature(void);
 /// Maps memory flat (1 MB sections): RAM cached, the peripherals as device
 /// memory. Turns on the MMU, the caches and branch prediction.
 void mmu_init(uint32_t ram_top);
+/// Maps [virt, virt+len) to [phys, ...) in 4 KB write-through pages (all
+/// within one MB): the framebuffer. False if it can't.
+bool mmu_map_write_through(uint32_t virt, uint32_t phys, uint32_t len);
 /// Cleans and invalidates the data cache for [addr, addr+len): needed before
 /// the GPU or a DMA engine reads memory the ARM wrote, and after it writes.
 void dcache_clean_invalidate(const void *addr, size_t len);

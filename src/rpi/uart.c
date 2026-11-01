@@ -72,14 +72,15 @@ static void rx_drain(void) {
     }
 }
 
-void uart_irq(void) {
+void uart_irq(void *unused) {
+    (void)unused;
     rx_drain();
     REG(UART_ICR) = (1u << 4) | (1u << 6);  // RX and RX timeout
 }
 
 void uart_enable_irq(void) {
     REG(UART_IMSC) = (1u << 4) | (1u << 6);
-    REG(IRQ_BASE + 0x14) = 1u << (57 - 32);  // enable IRQ 57, UART0
+    irq_connect(57, uart_irq, 0);
     rx_irq_on = true;
 }
 
