@@ -21,8 +21,8 @@ This build is GPLv3, because the USB keyboard comes from the USPi library.
    BEEP, SOUND, PLAY and MUSIC over HDMI; PWM, I2C, SPI and COM1.
 5. **Wi-Fi** (under way): the SD card moved to the SDHOST controller and the
    Wi-Fi chip on EMMC with `WIFI SCAN` (both working on the board); joining
-   a network (WPA2), lwIP, DHCP and NTP (waiting for a test on the board);
-   MQTT comes next.
+   a network (WPA2), lwIP, DHCP and NTP (working on the board); MQTT
+   (waiting for a test on the board).
 
 ## Building
 
@@ -137,6 +137,14 @@ with these differences:
   `WIFI(2)` is -1 once it has); `TZ` gives the local time. WPA2 (AES) and
   open networks work; the chip's firmware does the WPA2 handshake. A
   password can't hold `#`, `;` or `'` (they start comments in `BASIC.CFG`).
+- **MQTT** as on the Pico W: `MQTT CONNECT "broker"[, port]`, `MQTT PUBLISH
+  topic$, message$[, qos[, retain]]`, `MQTT SUBSCRIBE topic$[, qos]`,
+  `MQTT UNSUBSCRIBE`, `MQTT DISCONNECT` and `MQTT` (the state). Messages that
+  come in wait in a queue: `MQTT(1)` counts them, `MQTT$(0)` takes the next
+  one's topic and `MQTT$(1)` its payload; `ON MQTT GOSUB` runs a line when
+  one comes. With `MQTT = ON` and `MQTT_BROKER` (and `MQTT_PORT`,
+  `MQTT_USER`, `MQTT_PASSWORD`, `MQTT_CLIENT_ID`) in `BASIC.CFG`, it
+  connects by itself once Wi-Fi is up, and again if the connection drops.
 - The Pi has no ADC (`ADC()` gives -1) and no PIO (no `NEOPIXEL`).
 - The Pi has no clock that keeps time while it is off: `DATE$` and `TIME$`
   start at 1 Jan 1970 until NTP or a program sets them.
@@ -153,7 +161,7 @@ with these differences:
 | `src/sd_disk.c` | FatFs's disk functions on the card, and its clock |
 | `src/rpi/sdio.c` | SDIO on the EMMC controller, wired to the Wi-Fi chip |
 | `src/rpi/wlan.c` | the Wi-Fi chip (CYW43430): bring-up, firmware, commands, events and scanning (after Richard Miller's ether4330.c for Plan 9) |
-| `src/net/` | the network: lwIP on the Wi-Fi chip, joining, DHCP and SNTP (`net.c`), lwIP's settings |
+| `src/net/` | the network: lwIP on the Wi-Fi chip, joining, DHCP and SNTP (`net.c`), MQTT (`mqtt_port.c`), lwIP's settings |
 | `lib/lwip/` | [lwIP](https://savannah.nongnu.org/projects/lwip/) 2.2.1 (BSD): the core, IPv4, SNTP and MQTT |
 | `src/rpi/pins.c` | PWM, I2C (BSC) and SPI0 |
 | `src/rpi/fb.c` | the HDMI framebuffer (640x480, RGB332 palette) |

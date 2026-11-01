@@ -23,6 +23,8 @@
 #include "rpi/rpi.h"
 #include "rpi/wlan.h"
 
+void mqtt_auto(void);  // mqtt_port.c
+
 static struct netif nif;
 static bool stack_up;   ///< lwip_init and netif_add done
 static bool want;       ///< keep joining net_ssid
@@ -188,6 +190,7 @@ void net_poll(void) {
         had_ip = has_ip;
     }
     sys_check_timeouts();
+    mqtt_auto();
     polling = false;
 }
 

@@ -1246,30 +1246,7 @@ int port_wifi_value(int n) {
 const char *port_wifi_text(int n) {
     return n == 0 ? net_ip() : n == 1 ? net_ssid() : "";
 }
-bool port_mqtt_available(void) { return false; }
-const char *port_mqtt_connect(const char *host, int port) {
-    (void)host, (void)port;
-    return NULL;
-}
-void port_mqtt_disconnect(void) {}
-const char *port_mqtt_publish(const char *topic, const char *payload, int len, int qos, bool retain) {
-    (void)topic, (void)payload, (void)len, (void)qos, (void)retain;
-    return NULL;
-}
-const char *port_mqtt_subscribe(const char *topic, int qos, bool sub) {
-    (void)topic, (void)qos, (void)sub;
-    return NULL;
-}
-void port_mqtt_status(void) {}
-int port_mqtt_value(int n) {
-    (void)n;
-    return 0;
-}
-const char *port_mqtt_text(int n, int *len) {
-    (void)n;
-    *len = 0;
-    return "";
-}
+// MQTT: src/net/mqtt_port.c
 
 bool port_clock_12h(void) {
     return config.clock12;
