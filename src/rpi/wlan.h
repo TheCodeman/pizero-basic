@@ -49,3 +49,28 @@ typedef void wlan_found_t(const wlan_network_t *net);
 /// @param stop polled while scanning: true stops it
 /// @return NULL, or why it failed ("stopped" if stop said so)
 const char *wlan_scan(wlan_found_t *found, bool (*stop)(void));
+
+/// Called with each Ethernet frame the chip receives (from inside wlan_poll
+/// or another call here: copy it and handle it later).
+typedef void wlan_rx_t(const uint8_t *frame, int len);
+void wlan_set_rx(wlan_rx_t *rx);
+
+/// Reads what the chip has for us (frames, events). Cheap when there is nothing.
+void wlan_poll(void);
+
+/// Sends an Ethernet frame; false if the chip is off, busy or has no room.
+bool wlan_send(const uint8_t *frame, int len);
+
+/// Starts joining a network (WPA2 with a password, open without); wlan_link says how it goes.
+/// @return NULL, or why it couldn't start
+const char *wlan_join(const char *ssid, const char *password);
+
+/// Leaves the network.
+void wlan_leave(void);
+
+/// The link: as the Pico W's CYW43_LINK_* values where they match.
+enum { WLAN_DOWN = 0, WLAN_JOINING = 1, WLAN_JOINED = 2, WLAN_FAIL = -1, WLAN_NONET = -2, WLAN_BADAUTH = -3 };
+int wlan_link(void);
+
+/// The signal from the access point, dBm (0 if not joined).
+int wlan_rssi(void);

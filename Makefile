@@ -16,7 +16,7 @@ BUILD   := build
 ARCH    := -mcpu=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard -marm
 CFLAGS  := $(ARCH) -O2 -g -std=gnu11 -Wall -Wextra -ffunction-sections -fdata-sections \
            -fno-common -Isrc -Isrc/basic -Isrc/fatfs -Isrc/compat -Isrc/screen \
-           -Ilib/uspi/include -DPIZERO=1 -DPICO_BASIC_EDITOR=1 -DPICO_BASIC_WIFI=0 \
+           -Ilib/uspi/include -Isrc/net -Ilib/lwip/src/include -DPIZERO=1 -DPICO_BASIC_EDITOR=1 -DPICO_BASIC_WIFI=1 \
            -DCONFIG_PATH='"SD:/BASIC.CFG"' -DCOM1_TX_DEFAULT=14 \
            -DI2C_SDA_DEFAULT=2 -DSPI_SCK_DEFAULT=11
 # The shared pico-basic sources are kept as they are upstream: quieter there.
@@ -26,7 +26,7 @@ LDFLAGS := $(ARCH) -nostartfiles -T boot/link.ld -Wl,--gc-sections -Wl,-Map=$(BU
 LIBS    := -lc -lm -lgcc
 
 SRCS := src/main.c src/terminal.c src/basic_port_rpi.c src/sd_disk.c src/usb_input.c src/audio.c \
-        $(wildcard src/rpi/*.c)
+        $(wildcard src/rpi/*.c) $(wildcard src/net/*.c)
 SHARED := src/basic/basic.c src/term_editor.c src/xfer.c src/config.c src/fatfs/ff.c \
           src/fatfs/ffunicode.c $(wildcard src/screen/*.c) src/mod/mod.c src/mod/xm.c
 SRCS += $(SHARED)
@@ -35,6 +35,12 @@ $(SHARED:%.c=$(BUILD)/%.o): CFLAGS += $(SHARED_CFLAGS)
 USPI_SRCS := $(wildcard lib/uspi/lib/*.c)
 USPI_CFLAGS := $(ARCH) -O2 -g -Wall -Wno-psabi -fsigned-char -fno-builtin -nostdinc -std=gnu99 \
                -undef -DRASPPI=1 -Ilib/uspi/include -ffunction-sections -fdata-sections
+
+# lwIP 2.2.1 (BSD): the core, IPv4, Ethernet, SNTP and MQTT.
+LWIP_SRCS := $(wildcard lib/lwip/src/core/*.c) $(wildcard lib/lwip/src/core/ipv4/*.c) \
+             lib/lwip/src/netif/ethernet.c lib/lwip/src/apps/sntp/sntp.c lib/lwip/src/apps/mqtt/mqtt.c
+SRCS += $(LWIP_SRCS)
+$(LWIP_SRCS:%.c=$(BUILD)/%.o): CFLAGS += -Wno-unused-parameter -Wno-sign-compare -Wno-missing-field-initializers -Wno-address
 
 OBJS := $(BUILD)/start.o $(SRCS:%.c=$(BUILD)/%.o) $(USPI_SRCS:%.c=$(BUILD)/%.o)
 

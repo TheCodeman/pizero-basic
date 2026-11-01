@@ -19,10 +19,10 @@ This build is GPLv3, because the USB keyboard comes from the USPi library.
    from either one.
 4. **Sound and hardware commands** (done, waiting for a test on the board):
    BEEP, SOUND, PLAY and MUSIC over HDMI; PWM, I2C, SPI and COM1.
-5. **Wi-Fi** (under way): the SD card moved to the SDHOST controller (done),
-   then the Wi-Fi chip on EMMC: its firmware and `WIFI SCAN` (waiting for a
-   test on the board). Joining a network (WPA2), lwIP and DHCP, then NTP and
-   MQTT, come next.
+5. **Wi-Fi** (under way): the SD card moved to the SDHOST controller and the
+   Wi-Fi chip on EMMC with `WIFI SCAN` (both working on the board); joining
+   a network (WPA2), lwIP, DHCP and NTP (waiting for a test on the board);
+   MQTT comes next.
 
 ## Building
 
@@ -118,14 +118,28 @@ with these differences:
   firmware runs the link as HDMI, not DVI. The banner's `Sound:` line says
   if there is none (a DVI monitor, or one without speakers): then the
   commands run silently.
-- **Wi-Fi:** `WIFI ON` starts the chip (loading its firmware from
-  `SD:/firmware/` takes a second or two), `WIFI` says its state and MAC
-  address, `WIFI SCAN` lists the networks around (it starts the chip if it
-  is off; Esc stops it) and `WIFI OFF` stops it. Joining a network is still
-  to come. `WIFI_COUNTRY` in `BASIC.CFG` sets the radio's country.
+- **Wi-Fi:** put the network in `BASIC.CFG`:
+
+  ```
+  WIFI_SSID = MyNetwork
+  WIFI_PASSWORD = my password
+  WIFI_COUNTRY = US
+  ```
+
+  The Pi joins it at power-up (unless `WIFI = OFF`), in the background.
+  `WIFI ON` starts the chip and joins, waiting until it is connected (Esc
+  stops waiting), `WIFI` says how it is (the network, signal and IP
+  address), `WIFI SCAN` lists the networks around and `WIFI OFF` turns the
+  radio off. `WIFI(0)` is -1 when connected, `WIFI(1)` the signal in dBm,
+  `WIFI(3)` the link's state as on the Pico W, `WIFI$(0)` the IP address and
+  `WIFI$(1)` the network. Once connected, the clock is set by NTP
+  (`NTP_SERVER`, pool.ntp.org by default; `NTP` asks again now and
+  `WIFI(2)` is -1 once it has); `TZ` gives the local time. WPA2 (AES) and
+  open networks work; the chip's firmware does the WPA2 handshake. A
+  password can't hold `#`, `;` or `'` (they start comments in `BASIC.CFG`).
 - The Pi has no ADC (`ADC()` gives -1) and no PIO (no `NEOPIXEL`).
 - The Pi has no clock that keeps time while it is off: `DATE$` and `TIME$`
-  start at 1 Jan 1970 until a program sets them.
+  start at 1 Jan 1970 until NTP or a program sets them.
 - **Memory:** about 450 MB for BASIC.
 
 ## The layout
@@ -139,6 +153,8 @@ with these differences:
 | `src/sd_disk.c` | FatFs's disk functions on the card, and its clock |
 | `src/rpi/sdio.c` | SDIO on the EMMC controller, wired to the Wi-Fi chip |
 | `src/rpi/wlan.c` | the Wi-Fi chip (CYW43430): bring-up, firmware, commands, events and scanning (after Richard Miller's ether4330.c for Plan 9) |
+| `src/net/` | the network: lwIP on the Wi-Fi chip, joining, DHCP and SNTP (`net.c`), lwIP's settings |
+| `lib/lwip/` | [lwIP](https://savannah.nongnu.org/projects/lwip/) 2.2.1 (BSD): the core, IPv4, SNTP and MQTT |
 | `src/rpi/pins.c` | PWM, I2C (BSC) and SPI0 |
 | `src/rpi/fb.c` | the HDMI framebuffer (640x480, RGB332 palette) |
 | `src/rpi/hdmi_sound.c` | sound over HDMI: 48 kHz stereo into the HDMI audio FIFO by DMA (after Circle's driver, GPLv3) |

@@ -94,6 +94,18 @@ static bool rsp_ready;  ///< rsp has come: stop reading frames
 static wlan_found_t *scan_found;
 static bool scan_done;
 
+static wlan_rx_t *rx_handler;
+static bool busy;  ///< inside one of the interface's calls: wlan_poll waits
+
+/// The join's progress, from the firmware's events.
+enum { J_ASSOC = 1, J_LINK = 2, J_KEYED = 4 };
+static struct {
+    bool active;   ///< joining or joined
+    bool secure;   ///< WPA2: wait for the keys too
+    uint8_t bits;  ///< J_*
+    int failed;    ///< 0, or WLAN_FAIL, WLAN_NONET, WLAN_BADAUTH
+} join;
+
 static void put2(uint8_t *p, uint32_t v) {
     p[0] = (uint8_t)v, p[1] = (uint8_t)(v >> 8);
 }
@@ -609,7 +621,14 @@ static void dispatch(int len) {
                 event(rxbuf + doffset + bdc, len - doffset - bdc);
         }
         break;
-    default:  // data: no network stack yet
+    case 2:  // data: an Ethernet frame
+        if (len > doffset + 4) {
+            int bdc = 4 + (rxbuf[doffset + 3] << 2);
+            if (len >= doffset + bdc + 14 && rx_handler)
+                rx_handler(rxbuf + doffset + bdc, len - doffset - bdc);
+        }
+        break;
+    default:
         break;
     }
 }
@@ -825,8 +844,35 @@ static void event(const uint8_t *p, int len) {
     if (len < 14 + 10 + 48)
         return;
     p += 24, len -= 24;
+    uint32_t flags = getbe2(p + 2);
     uint32_t type = getbe2(p + 6);
     uint32_t status = getbe4(p + 8);
+    uint32_t reason = getbe4(p + 12);
+    if (join.active) {
+        switch (type) {
+        case 0:  // E_SET_SSID
+            if (status == 0)
+                join.bits |= J_ASSOC;
+            else
+                join.failed = status == 3 ? WLAN_NONET : WLAN_FAIL;
+            break;
+        case 16:  // E_LINK
+            if (flags & 1)
+                join.bits |= J_LINK;
+            else
+                join.bits = 0;
+            break;
+        case 46:  // E_PSK_SUP
+            if (status == 6)  // keyed
+                join.bits |= J_KEYED;
+            else if (!((status == 4 || status == 8 || status == 11) && reason == 15))
+                join.failed = WLAN_BADAUTH;  // (reason 15 is a time-out at the edge of the cell)
+            break;
+        case 5: case 6: case 11: case 12:  // E_DEAUTH(_IND), E_DISASSOC(_IND)
+            join.bits = 0;
+            break;
+        }
+    }
     if (type == 69) {  // E_ESCAN_RESULT: 8 partial, otherwise the last
         if (status == 8)
             scan_result(p + 48, len - 48);
@@ -837,14 +883,31 @@ static void event(const uint8_t *p, int len) {
 
 // ---- The interface -----------------------------------------------------------------
 
+/// Starts one of the calls below: false if the chip is off or in use.
+#define ENTER(fail_value)                 \
+    do {                                  \
+        if (!chip.up || busy)             \
+            return fail_value;            \
+        busy = true;                      \
+        if (setjmp(fail_jump)) {          \
+            busy = false;                 \
+            return fail_value;            \
+        }                                 \
+    } while (0)
+
 const char *wlan_start(const char *country) {
     if (chip.up)
         return NULL;
+    if (busy)
+        return "Wi-Fi is busy";
+    busy = true;
     if (setjmp(fail_jump)) {
         fw_close();
         chip.up = false;
+        busy = false;
         return fail_why;
     }
+    memset(&join, 0, sizeof join);
     int id = chip.chipid;
     memset(&chip, 0, sizeof chip);
     chip.chipid = id;
@@ -856,17 +919,18 @@ const char *wlan_start(const char *country) {
     clmload();
     wlinit(country);
     chip.up = true;
+    busy = false;
     return NULL;
 }
 
 void wlan_stop(void) {
-    if (!chip.up)
-        return;
-    chip.up = false;
-    if (setjmp(fail_jump))
-        return;
-    cmdint(3, 0);  // DOWN
+    ENTER();
+    memset(&join, 0, sizeof join);
+    cmdint(52, 0);  // DISASSOC
+    cmdint(3, 0);   // DOWN
     wrb(Fn0, Ioabort, 1 << 3);  // reset the SDIO side
+    chip.up = false;
+    busy = false;
 }
 
 bool wlan_up(void) {
@@ -890,8 +954,12 @@ int wlan_chip(int *rev) {
 const char *wlan_scan(wlan_found_t *found, bool (*stop)(void)) {
     if (!chip.up)
         return "Wi-Fi is off";
+    if (busy)
+        return "Wi-Fi is busy";
+    busy = true;
     if (setjmp(fail_jump)) {
         scan_found = NULL;
+        busy = false;
         return fail_why;
     }
     // escan's parameters: version[4] action[2] sync_id[2] ssidlen[4] ssid[32]
@@ -922,6 +990,7 @@ const char *wlan_scan(wlan_found_t *found, bool (*stop)(void)) {
     cmdint(49, 0);  // passive scanning off
     if (setvar("escan", params, (int)(p - params))) {
         scan_found = NULL;
+        busy = false;
         return "the Wi-Fi chip wouldn't scan";
     }
     uint64_t end = timer_us() + 15000000;
@@ -929,9 +998,136 @@ const char *wlan_scan(wlan_found_t *found, bool (*stop)(void)) {
         poll(50000, &scan_done);
         if (stop && stop()) {
             scan_found = NULL;
+            busy = false;
             return "stopped";
         }
     }
     scan_found = NULL;
+    busy = false;
     return scan_done ? NULL : "the scan didn't finish";
+}
+
+void wlan_set_rx(wlan_rx_t *rx) {
+    rx_handler = rx;
+}
+
+void wlan_poll(void) {
+    ENTER();
+    if (service())
+        poll(0, NULL);
+    busy = false;
+}
+
+bool wlan_send(const uint8_t *frame, int len) {
+    if (len <= 0 || len > PKT - SDPCM - 4)
+        return false;
+    ENTER(false);
+    // Wait (a little) for the firmware to have room: it says how many frames
+    // it will take in each frame it sends.
+    uint64_t end = timer_us() + 100000;
+    for (;;) {
+        uint8_t credit = (uint8_t)(chip.txwindow - chip.txseq);
+        if (credit && credit <= 0x40 && !(chip.fcmask & 1 << 2))
+            break;
+        if (timer_us() > end) {
+            busy = false;
+            return false;
+        }
+        poll(1000, NULL);
+    }
+    int total = SDPCM + 4 + len;
+    memset(txbuf, 0, SDPCM + 4);
+    put2(txbuf, (uint32_t)total);
+    put2(txbuf + 2, (uint32_t)~total);
+    txbuf[4] = chip.txseq;
+    txbuf[5] = 2;  // data
+    txbuf[7] = SDPCM;
+    txbuf[SDPCM] = 0x20;  // the BDC header: version 2
+    memcpy(txbuf + SDPCM + 4, frame, (size_t)len);
+    packetrw(true, txbuf, total);
+    chip.txseq++;
+    busy = false;
+    return true;
+}
+
+const char *wlan_join(const char *ssid, const char *password) {
+    if (!chip.up)
+        return "Wi-Fi is off";
+    int n = (int)strlen(ssid), k = password ? (int)strlen(password) : 0;
+    if (n < 1 || n > 32)
+        return "the network's name must be 1 to 32 characters";
+    if (k && (k < 8 || k > 64))
+        return "a WPA2 password is 8 to 63 characters (or 64 hex digits)";
+    if (busy)
+        return "Wi-Fi is busy";
+    busy = true;
+    if (setjmp(fail_jump)) {
+        busy = false;
+        join.active = false;
+        return fail_why;
+    }
+    memset(&join, 0, sizeof join);
+    cmdint(52, 0);  // DISASSOC from any network before
+    uint8_t b[68];
+    if (k) {
+        setint("wsec", 4);  // AES
+        put4(b, 0), put4(b + 4, 1);
+        setvar("bsscfg:sup_wpa", b, 8);  // the firmware's own supplicant does the handshake
+        put4(b + 4, 0xFFFFFFFFu);
+        setvar("bsscfg:sup_wpa2_eapver", b, 8);
+        put4(b + 4, 2500);
+        setvar("bsscfg:sup_wpa_tmo", b, 8);
+        timer_delay_us(2000);
+        memset(b, 0, sizeof b);
+        put2(b, (uint32_t)k);
+        put2(b + 2, k < 64 ? 1 : 0);  // a passphrase, or the key in hex
+        memcpy(b + 4, password, (size_t)k);
+        must(wlcmd(true, 268, b, 68, NULL, 0));  // SET_WSEC_PMK
+        must(cmdint(20, 1));     // SET_INFRA
+        must(cmdint(22, 0));     // SET_AUTH: open system
+        must(cmdint(165, 0x80)); // SET_WPA_AUTH: WPA2 PSK
+    } else {
+        setint("wsec", 0);
+        put4(b, 0), put4(b + 4, 0);
+        setvar("bsscfg:sup_wpa", b, 8);
+        must(cmdint(20, 1));
+        must(cmdint(22, 0));
+        must(cmdint(165, 0));
+    }
+    join.secure = k > 0;
+    join.active = true;
+    memset(b, 0, 36);
+    put4(b, (uint32_t)n);
+    memcpy(b + 4, ssid, (size_t)n);
+    if (wlcmd(true, 26, b, 36, NULL, 0)) {  // SET_SSID: starts the join
+        join.active = false;
+        busy = false;
+        return "the Wi-Fi chip wouldn't join";
+    }
+    busy = false;
+    return NULL;
+}
+
+void wlan_leave(void) {
+    ENTER();
+    memset(&join, 0, sizeof join);
+    cmdint(52, 0);  // DISASSOC
+    busy = false;
+}
+
+int wlan_link(void) {
+    if (!chip.up || !join.active)
+        return WLAN_DOWN;
+    if (join.failed)
+        return join.failed;
+    uint8_t need = J_ASSOC | J_LINK | (join.secure ? J_KEYED : 0);
+    return (join.bits & need) == need ? WLAN_JOINED : WLAN_JOINING;
+}
+
+int wlan_rssi(void) {
+    ENTER(0);
+    uint8_t b[4] = {0};
+    int r = wlcmd(false, 127, NULL, 0, b, 4) ? 0 : (int)(int32_t)get4(b);  // GET_RSSI
+    busy = false;
+    return r;
 }

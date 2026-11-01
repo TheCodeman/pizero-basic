@@ -13,6 +13,7 @@
 #include "basic.h"
 #include "basic_port.h"
 #include "config.h"
+#include "net.h"
 #include "terminal.h"
 #include "ff.h"
 #include "rpi/rpi.h"
@@ -22,7 +23,7 @@
 #include "usb_input.h"
 
 #ifndef PIZERO_BASIC_VERSION
-#define PIZERO_BASIC_VERSION "0.5"
+#define PIZERO_BASIC_VERSION "0.6"
 #endif
 
 extern char *heap_limit;
@@ -118,6 +119,13 @@ int main(void) {
     config_load();
     printf("\x1b[0m\x1b[2J\x1b[H");
     board_banner();
+    if (config.wifi && config.wifi_ssid[0] && !sd_error) {
+        const char *err = net_connect(config.wifi_ssid, config.wifi_password);
+        if (err)
+            printf("Wi-Fi: %s\n", err);
+        else
+            printf("Wi-Fi: joining %s (WIFI says how it goes)\n", config.wifi_ssid);
+    }
     const char *first = autorun();
     for (;;) {
         basic_main(first);  // SYSTEM comes back here
