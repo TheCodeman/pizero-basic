@@ -928,6 +928,21 @@ void console_set_color(uint8_t new_fg, uint8_t new_bg) {
     busy = false;
 }
 
+void console_resize(void) {
+    busy = true;
+    pointer_row = -1;
+    cursor_shown = false;
+    console_cols = DVI_WIDTH / GLYPH_W;
+    console_rows = DVI_HEIGHT / GLYPH_H;
+    scroll_top = view_top = 0;
+    scroll_bottom = view_bottom = console_rows - 1;
+    memset(dvi_framebuf, bg, (size_t)DVI_WIDTH * DVI_HEIGHT);
+    memset(cell_ch, ' ', sizeof cell_ch);
+    memset(cell_attr, attr_of(fg, bg), sizeof cell_attr);
+    cur_col = cur_row = 0;
+    busy = false;
+}
+
 void console_init(void) {
     console_cols = DVI_WIDTH / GLYPH_W;
     console_rows = DVI_HEIGHT / GLYPH_H;

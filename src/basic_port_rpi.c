@@ -33,6 +33,7 @@
 #include "image.h"
 #include "mod/mod.h"
 #include "mod/xm.h"
+#include "rpi/fb.h"
 #include "rpi/rpi.h"
 #include "screen/console.h"
 #include "screen/mouse.h"
@@ -172,6 +173,30 @@ int port_screen_width(void) { return DVI_WIDTH; }
 int port_screen_height(void) { return DVI_HEIGHT; }
 int port_text_cols(void) { return CONSOLE_COLS; }
 int port_text_rows(void) { return CONSOLE_ROWS; }
+
+const char *port_screen_res(int w, int h) {
+    if (!fb_present())
+        return "no screen";
+    if (!w) {  // the monitor's own size (halved while too big, as at power-up)
+        fb_display_size(&w, &h);
+        while (w > DVI_MAX_WIDTH || h > DVI_MAX_HEIGHT)
+            w /= 2, h /= 2;
+    }
+    port_reset_pages();
+    console_freeze(true);
+    const char *err = fb_resize(w, h);
+    console_resize();
+    return err;
+}
+
+void port_screen_res_show(void) {
+    int dw, dh;
+    fb_display_size(&dw, &dh);
+    printf("Screen: %dx%d, %dx%d text; the monitor runs at %dx%d\n", DVI_WIDTH, DVI_HEIGHT, CONSOLE_COLS,
+           CONSOLE_ROWS, dw, dh);
+    printf("SCREEN RES w, h changes it (640x480 up to %dx%d); SCREEN RES 0 is the monitor's size\n",
+           DVI_MAX_WIDTH, DVI_MAX_HEIGHT);
+}
 
 void port_fill_rect(int x, int y, int w, int h, uint8_t rgb332) {
     uint8_t *row = &(draw_fb ? draw_fb : dvi_framebuf)[y * DVI_WIDTH + x];

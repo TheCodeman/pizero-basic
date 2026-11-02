@@ -127,6 +127,13 @@ int port_text_cols(void);
 int port_text_rows(void);
 ///@}
 
+/// SCREEN RES w, h: makes the screen w x h pixels (the text grid follows):
+/// NULL, or why not. With w 0: the monitor's own size. basic.c's weak version
+/// says the port can't.
+const char *port_screen_res(int w, int h);
+/// SCREEN RES alone: says the screen's size (and what it can be).
+void port_screen_res_show(void);
+
 /// Graphics on the RGB332 screen (coordinates already clipped).
 /// @param x the left
 /// @param y the top

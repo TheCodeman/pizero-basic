@@ -5016,6 +5016,13 @@ __attribute__((weak)) int port_screen_width(void) { return 640; }
 __attribute__((weak)) int port_screen_height(void) { return 480; }
 __attribute__((weak)) int port_text_cols(void) { return 80; }
 __attribute__((weak)) int port_text_rows(void) { return 30; }
+__attribute__((weak)) const char *port_screen_res(int w, int h) {
+    (void)w, (void)h;
+    return "this screen's size is fixed";
+}
+__attribute__((weak)) void port_screen_res_show(void) {
+    printf("Screen: %dx%d, %dx%d text\n", FB_W, FB_H, SCREEN_COLS, SCREEN_ROWS);
+}
 
 static int screen_mode;            ///< 0 = text
 static int page_count = 1;          ///< screen pages the mode has
@@ -5458,6 +5465,29 @@ static void do_mouse(void) {
 static void do_screen(void) {
     int mode = screen_mode, apage = -1, vpage = -1;
     bool have_mode = false;
+    if (accept_word("RES")) {  // SCREEN RES [w, h]: the screen's size (text 0 afterwards)
+        out_flush();
+        if (at_end_of_statement()) {
+            port_screen_res_show();
+            out_col = 0;
+            return;
+        }
+        int w = arg_int(), h = 0;
+        if (w) {
+            expect(",");
+            h = arg_int();
+        }
+        set_screen_mode(0);
+        const char *err = port_screen_res(w, h);
+        set_screen_mode(0);
+        if (err) {
+            out_str("SCREEN RES: ");
+            out_str(err);
+            out_newline();
+            error(E_ILLEGAL_CALL);
+        }
+        return;
+    }
     skip_spaces();
     if (*p != ',') {
         mode = arg_int();

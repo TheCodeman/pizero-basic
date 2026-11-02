@@ -32,6 +32,10 @@ extern int console_cols, console_rows;
 #define CONSOLE_ROWS console_rows
 ///@}
 
+/// After the screen changed size (console_freeze(true) first): the text grid
+/// follows it, cleared.
+void console_resize(void);
+
 /// Clears the screen and sets up the console (cursor blink, mouse pointer timers).
 void console_init(void);
 /// Clears the screen.

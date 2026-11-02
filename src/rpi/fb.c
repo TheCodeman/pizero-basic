@@ -60,15 +60,26 @@ static uint32_t allocate(int w, int h, uint32_t *size, uint32_t *pitch_out) {
     return m[alloc + 3];
 }
 
-const char *fb_init(void) {
-    int w, h;
-    firmware_size(&w, &h);
-    if (w < 640 || h < 480)
-        w = 640, h = 480;
-    while (w > DVI_MAX_WIDTH || h > DVI_MAX_HEIGHT)
-        w /= 2, h /= 2;
-    w &= ~7;  // whole text cells across
+static int display_w = 640, display_h = 480;  ///< the monitor's mode, as the firmware set it
 
+/// Releases the framebuffer the firmware gave (before asking for another).
+static void release(void) {
+    static volatile uint32_t m[6] __attribute__((aligned(16)));
+    m[0] = sizeof m;
+    m[1] = 0;
+    m[2] = 0x48001; m[3] = 0; m[4] = 0;
+    m[5] = 0;
+    mbox_property(m);
+}
+
+void fb_display_size(int *w, int *h) {
+    *w = display_w;
+    *h = display_h;
+}
+
+/// Gets a w x h framebuffer, maps it and sets the palette: NULL, or why not.
+static const char *set_size(int w, int h) {
+    w &= ~7;  // whole text cells across
     uint32_t base = 0, size = 0, pitch = 0;
     for (int tries = 0; tries < 2; tries++) {
         base = allocate(w, h, &size, &pitch);
@@ -107,4 +118,32 @@ const char *fb_init(void) {
     dvi_height = h;
     fb_ok = true;
     return 0;
+}
+
+const char *fb_init(void) {
+    int w, h;
+    firmware_size(&w, &h);
+    if (w < 640 || h < 480)
+        w = 640, h = 480;
+    display_w = w, display_h = h;
+    while (w > DVI_MAX_WIDTH || h > DVI_MAX_HEIGHT)
+        w /= 2, h /= 2;
+    return set_size(w, h);
+}
+
+const char *fb_resize(int w, int h) {
+    if (!fb_ok)
+        return "no screen";
+    if (w < 640 || h < 480 || w > DVI_MAX_WIDTH || h > DVI_MAX_HEIGHT)
+        return "the size must be 640x480 to 1920x1200";
+    int old_w = dvi_width, old_h = dvi_height;
+    fb_ok = false;
+    release();
+    const char *err = set_size(w, h);
+    if (err) {
+        release();
+        if (set_size(old_w, old_h))
+            return "the screen is lost";
+    }
+    return err;
 }

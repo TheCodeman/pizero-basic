@@ -105,6 +105,11 @@ with these differences:
   keep their own sizes, centred; `SCREEN 14` is the whole screen at its own
   size with 256 colours (`RGB()` or 0-255 as in `SCREEN 13`), two pages.
   Over 1920x1200 (4K) the screen is halved and scaled up.
+  `SCREEN RES w, h` changes the size while running (640x480 up to
+  1920x1200): the text grid follows it, cleared, in `SCREEN 0`. The HDMI
+  mode itself stays as the firmware set it at power-up, and the GPU scales
+  the picture to it; `SCREEN RES 0` goes back to the monitor's own size and
+  `SCREEN RES` alone says the sizes.
 - **`EDIT`** opens the full-screen editor, on both.
 - **Pins:** `PIN` and `PIN MODE` work on GPIO 0-27 of the header (14 and 15
   are the console). `PIN LED` is the green ACT LED (GPIO47). `TEMP()` is the
