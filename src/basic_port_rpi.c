@@ -120,7 +120,7 @@ void port_edit_file(const char *path) {
 
 static uint8_t *pages[MAX_PAGES];  ///< NULL until used; stale while on show
 static int visual_page;
-static uint8_t *draw_fb = dvi_framebuf;  ///< where drawing goes
+static uint8_t *draw_fb;  ///< where drawing goes (NULL: the screen)
 
 static bool need_page(int n) {
     if (!pages[n]) {
@@ -168,21 +168,26 @@ void port_reset_pages(void) {
     }
 }
 
+int port_screen_width(void) { return DVI_WIDTH; }
+int port_screen_height(void) { return DVI_HEIGHT; }
+int port_text_cols(void) { return CONSOLE_COLS; }
+int port_text_rows(void) { return CONSOLE_ROWS; }
+
 void port_fill_rect(int x, int y, int w, int h, uint8_t rgb332) {
-    uint8_t *row = &draw_fb[y * DVI_WIDTH + x];
+    uint8_t *row = &(draw_fb ? draw_fb : dvi_framebuf)[y * DVI_WIDTH + x];
     for (int i = 0; i < h; ++i, row += DVI_WIDTH)
         memset(row, rgb332, w);
 }
 
 uint8_t port_get_pixel(int x, int y) {
-    return draw_fb[y * DVI_WIDTH + x];
+    return (draw_fb ? draw_fb : dvi_framebuf)[y * DVI_WIDTH + x];
 }
 
 const char *port_image(const char *path, int x, int y, int w, int h, int sx, int sy, bool fit,
                        int cx0, int cy0, int cx1, int cy1) {
     image_t img;
     const char *err;
-    if (!image_load(path, w ? w : 640, h ? h : 480, &img, &err))
+    if (!image_load(path, w ? w : DVI_WIDTH, h ? h : DVI_HEIGHT, &img, &err))
         return err;
     if (!w) {
         w = img.w * sx;

@@ -13,17 +13,19 @@
 #include "basic.h"
 #include "basic_port.h"
 #include "config.h"
+#include "dvi.h"
 #include "net.h"
 #include "terminal.h"
 #include "ff.h"
 #include "rpi/rpi.h"
 #include "rpi/fb.h"
 #include "rpi/ticker.h"
+#include "screen/console.h"
 #include "sd_disk.h"
 #include "usb_input.h"
 
 #ifndef PIZERO_BASIC_VERSION
-#define PIZERO_BASIC_VERSION "0.7"
+#define PIZERO_BASIC_VERSION "0.8"
 #endif
 
 extern char *heap_limit;
@@ -71,10 +73,12 @@ static void board_banner(void) {
         printf("SD card (SD:): %lu MB, %lu MB free\n", (unsigned long)(total >> 10),
                (unsigned long)(free_kb >> 10));
     }
-    if (fb_error)
+    if (fb_error) {
         printf("Screen: %s; the serial port only\n", fb_error);
-    if (!fb_error)
+    } else {
+        printf("Screen: %dx%d, %dx%d text\n", DVI_WIDTH, DVI_HEIGHT, CONSOLE_COLS, CONSOLE_ROWS);
         printf("Sound: %s\n", sound_error ? sound_error : "HDMI");
+    }
     if (usb_error)
         printf("USB: %s\n", usb_error);
     else

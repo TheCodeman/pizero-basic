@@ -55,6 +55,7 @@ static bool bold, reverse;
 ///@{
 static int cur_col, cur_row;
 ///@}
+int console_cols = 80, console_rows = 30;
 /// VT100 wrapping: writing the last column leaves the cursor there, and the
 /// line only wraps when the next character arrives.
 static bool wrap_pending;
@@ -62,11 +63,11 @@ static bool wrap_pending;
 static bool autowrap = true;
 /// The scroll region, inclusive.
 ///@{
-static int scroll_top, scroll_bottom = CONSOLE_ROWS - 1;
+static int scroll_top, scroll_bottom = 29;
 /// The rows escape sequences can reach (console_set_view): a program such as
 /// term keeps its own bars above and below them. Row 1 of ESC [ H is view_top.
 ///@{
-static int view_top, view_bottom = CONSOLE_ROWS - 1;
+static int view_top, view_bottom = 29;
 ///@}
 ///@}
 
@@ -111,7 +112,7 @@ static void (*reply_fn)(const char *text, int len);
 static struct alt_screen {
     /// Its characters and attributes.
     ///@{
-    uint8_t ch[CONSOLE_ROWS][CONSOLE_COLS], attr[CONSOLE_ROWS][CONSOLE_COLS];
+    uint8_t ch[CONSOLE_MAX_ROWS][CONSOLE_MAX_COLS], attr[CONSOLE_MAX_ROWS][CONSOLE_MAX_COLS];
     ///@}
     /// Its cursor.
     ///@{
@@ -130,8 +131,8 @@ static repeating_timer_t blink_timer;
 
 /// What each cell shows: the character, and its colours as a PC attribute
 /// byte (foreground + 16 * background), for BASIC's SCREEN() and PEEK.
-static uint8_t cell_ch[CONSOLE_ROWS][CONSOLE_COLS];
-static uint8_t cell_attr[CONSOLE_ROWS][CONSOLE_COLS];  ///< their attributes
+static uint8_t cell_ch[CONSOLE_MAX_ROWS][CONSOLE_MAX_COLS];
+static uint8_t cell_attr[CONSOLE_MAX_ROWS][CONSOLE_MAX_COLS];  ///< their attributes
 
 /// The PC colour number (0-15) nearest an RGB332 colour.
 /// @param rgb the colour
@@ -310,8 +311,8 @@ static void clear_rows(int row0, int row1) {
     if (row1 <= row0)
         return;
     memset(dvi_framebuf + row0 * TEXT_ROW_BYTES, bg, (row1 - row0) * TEXT_ROW_BYTES);
-    memset(cell_ch[row0], ' ', (row1 - row0) * CONSOLE_COLS);
-    memset(cell_attr[row0], attr_of(fg, bg), (row1 - row0) * CONSOLE_COLS);
+    memset(cell_ch[row0], ' ', (row1 - row0) * sizeof cell_ch[0]);
+    memset(cell_attr[row0], attr_of(fg, bg), (row1 - row0) * sizeof cell_attr[0]);
 }
 
 /// Moves rows top..bottom (inclusive) up by n, blanking the n rows at the bottom.
@@ -324,8 +325,8 @@ static void scroll_up(int top, int bottom, int n) {
         n = rows;
     memmove(dvi_framebuf + top * TEXT_ROW_BYTES, dvi_framebuf + (top + n) * TEXT_ROW_BYTES,
             (rows - n) * TEXT_ROW_BYTES);
-    memmove(cell_ch[top], cell_ch[top + n], (rows - n) * CONSOLE_COLS);
-    memmove(cell_attr[top], cell_attr[top + n], (rows - n) * CONSOLE_COLS);
+    memmove(cell_ch[top], cell_ch[top + n], (rows - n) * sizeof cell_ch[0]);
+    memmove(cell_attr[top], cell_attr[top + n], (rows - n) * sizeof cell_attr[0]);
     clear_rows(bottom + 1 - n, bottom + 1);
 }
 
@@ -339,8 +340,8 @@ static void scroll_down(int top, int bottom, int n) {
         n = rows;
     memmove(dvi_framebuf + (top + n) * TEXT_ROW_BYTES, dvi_framebuf + top * TEXT_ROW_BYTES,
             (rows - n) * TEXT_ROW_BYTES);
-    memmove(cell_ch[top + n], cell_ch[top], (rows - n) * CONSOLE_COLS);
-    memmove(cell_attr[top + n], cell_attr[top], (rows - n) * CONSOLE_COLS);
+    memmove(cell_ch[top + n], cell_ch[top], (rows - n) * sizeof cell_ch[0]);
+    memmove(cell_attr[top + n], cell_attr[top], (rows - n) * sizeof cell_attr[0]);
     clear_rows(top, top + n);
 }
 
@@ -928,7 +929,11 @@ void console_set_color(uint8_t new_fg, uint8_t new_bg) {
 }
 
 void console_init(void) {
-    memset(dvi_framebuf, bg, sizeof dvi_framebuf);
+    console_cols = DVI_WIDTH / GLYPH_W;
+    console_rows = DVI_HEIGHT / GLYPH_H;
+    scroll_top = view_top = 0;
+    scroll_bottom = view_bottom = console_rows - 1;
+    memset(dvi_framebuf, bg, (size_t)DVI_WIDTH * DVI_HEIGHT);
     memset(cell_ch, ' ', sizeof cell_ch);
     memset(cell_attr, attr_of(fg, bg), sizeof cell_attr);
     cur_col = cur_row = 0;

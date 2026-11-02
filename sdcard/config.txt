@@ -17,7 +17,17 @@ force_turbo=1
 # 64 MB for the GPU is plenty for a 640x480 screen; the rest is BASIC's.
 gpu_mem=64
 
-# HDMI (step 3): 640x480 at 60 Hz, even on a monitor that says otherwise.
+# HDMI: 640x480 at 60 Hz (80x30 text), even on a monitor that says otherwise.
+# For more on the screen pick another mode, and the text grows to fill it in
+# 8x16 cells (set the serial terminal to the same size):
+#   hdmi_group=2 hdmi_mode=9    800x600    100x37 text
+#   hdmi_group=2 hdmi_mode=16   1024x768   128x48
+#   hdmi_group=2 hdmi_mode=35   1280x1024  160x64
+#   hdmi_group=1 hdmi_mode=4    1280x720   160x45
+#   hdmi_group=1 hdmi_mode=16   1920x1080  240x67
+# or delete both lines for the monitor's own. framebuffer_width and
+# framebuffer_height draw a smaller picture that the GPU scales up to the
+# mode: 960 and 540 on a 1080p screen give 120x33 text, twice the size.
 hdmi_group=2
 hdmi_mode=4
 disable_overscan=1

@@ -104,9 +104,10 @@ uint32_t mbox_temperature(void);
 /// Maps memory flat (1 MB sections): RAM cached, the peripherals as device
 /// memory. Turns on the MMU, the caches and branch prediction.
 void mmu_init(uint32_t ram_top);
-/// Maps [virt, virt+len) to [phys, ...) in 4 KB write-through pages (all
-/// within one MB): the framebuffer. False if it can't.
-bool mmu_map_write_through(uint32_t virt, uint32_t phys, uint32_t len);
+/// Maps [phys, phys+len) write-through in 1 MB sections from the MB at
+/// `virt` on: the framebuffer. Its virtual address (phys's offset in its MB
+/// kept), or NULL if it can't.
+void *mmu_map_write_through(uint32_t virt, uint32_t phys, uint32_t len);
 /// Cleans and invalidates the data cache for [addr, addr+len): needed before
 /// the GPU or a DMA engine reads memory the ARM wrote, and after it writes.
 void dcache_clean_invalidate(const void *addr, size_t len);

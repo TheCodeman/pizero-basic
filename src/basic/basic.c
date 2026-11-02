@@ -52,12 +52,12 @@
 #define DATA_RESERVE   (16 * 1024)
 #define HEAP_MARGIN    (4 * 1024)  ///< the heap kept free beyond any allocation
 #define STACK_MAX      32           ///< FOR, GOSUB and WHILE frames each
-/// Screen columns.
-#define SCREEN_COLS    80
-/// Screen rows.
-#define SCREEN_ROWS    30
+/// Screen columns (80 on a 640x480 screen).
+#define SCREEN_COLS    port_text_cols()
+/// Screen rows (30 on a 640x480 screen).
+#define SCREEN_ROWS    port_text_rows()
 /// Lines LIST and FILES show before pausing.
-#define PAGE_LINES     28
+#define PAGE_LINES     (SCREEN_ROWS - 2)
 
 // ---- Errors ---------------------------------------------------------------
 
@@ -4998,17 +4998,24 @@ static void do_swap(void) {
 // ---- Graphics -------------------------------------------------------------
 //
 // SCREEN 1 (320x200, 4 colours), 2 (640x200, 2 colours), 12 (640x480, 16
-// colours) and 13 (320x200, 256 colours) draw straight into the 640x480
-// screen; the low-resolution modes are scaled up (2x2, or 1x2 for SCREEN 2)
-// and centred vertically. Text from PRINT and LOCATE still uses the 80x30
-// console on top. Colours are attributes looked up in attr_map (PALETTE
-// changes it); a colour of 256 or more is a direct RGB332 value, which is
-// what RGB(r,g,b) returns.
+// colours) and 13 (320x200, 256 colours) draw straight into the screen
+// (640x480, or bigger on some ports); the low-resolution modes are scaled
+// up (2x2, or 1x2 for SCREEN 2) and centred. SCREEN 14 is the whole screen
+// at its own size with 256 colours. Text from PRINT and LOCATE still uses
+// the console (80x30 on a 640x480 screen) on top. Colours are attributes
+// looked up in attr_map (PALETTE changes it); a colour of 256 or more is a
+// direct RGB332 value, which is what RGB(r,g,b) returns.
 
-/// The screen's width.
-#define FB_W 640
+/// The screen's width (640 unless the port's screen is bigger).
+#define FB_W port_screen_width()
 /// Its height.
-#define FB_H 480
+#define FB_H port_screen_height()
+
+// A port with a 640x480 screen and an 80x30 console needs none of these.
+__attribute__((weak)) int port_screen_width(void) { return 640; }
+__attribute__((weak)) int port_screen_height(void) { return 480; }
+__attribute__((weak)) int port_text_cols(void) { return 80; }
+__attribute__((weak)) int port_text_rows(void) { return 30; }
 
 static int screen_mode;            ///< 0 = text
 static int page_count = 1;          ///< screen pages the mode has
@@ -5018,7 +5025,7 @@ static int active_page, visual_page;
 ///@}
 /// The mode's logical size, its scale, and its vertical offset.
 ///@{
-static int gw, gh, gsx, gsy, gyoff;
+static int gw, gh, gsx, gsy, gxoff, gyoff;
 ///@}
 static int gcolours;               ///< attributes in this mode
 /// The drawing and background attributes.
@@ -5071,7 +5078,7 @@ static void default_palette(void) {
     }
     for (int i = 0; i < 16; ++i)
         attr_map[i] = pc_rgb[i];
-    if (screen_mode != 13)
+    if (gcolours != 256)  // only SCREEN 13 and 14 have the rest of the VGA palette
         return;
     for (int i = 0; i < 16; ++i) {
         double v = i / 15.0;
@@ -5217,7 +5224,7 @@ static int py_of(double y) {
 static void plot(int x, int y, uint8_t rgb) {
     if (x < clip_x1 || y < clip_y1 || x > clip_x2 || y > clip_y2)
         return;
-    port_fill_rect(x * gsx, y * gsy + gyoff, gsx, gsy, rgb);
+    port_fill_rect(x * gsx + gxoff, y * gsy + gyoff, gsx, gsy, rgb);
 }
 
 /// A horizontal line (clipped).
@@ -5238,7 +5245,7 @@ static void hspan(int x1, int x2, int y, uint8_t rgb) {
     if (x2 > clip_x2)
         x2 = clip_x2;
     if (x1 <= x2)
-        port_fill_rect(x1 * gsx, y * gsy + gyoff, (x2 - x1 + 1) * gsx, gsy, rgb);
+        port_fill_rect(x1 * gsx + gxoff, y * gsy + gyoff, (x2 - x1 + 1) * gsx, gsy, rgb);
 }
 
 /// A pixel's colour.
@@ -5246,7 +5253,7 @@ static void hspan(int x1, int x2, int y, uint8_t rgb) {
 /// @param y it
 /// @return RGB332
 static uint8_t read_rgb(int x, int y) {
-    return port_get_pixel(x * gsx, y * gsy + gyoff);
+    return port_get_pixel(x * gsx + gxoff, y * gsy + gyoff);
 }
 
 /// POINT: a pixel's attribute.
@@ -5347,6 +5354,8 @@ static void set_screen_mode(int mode) {
     case 11: gw = 640; gh = 480; gsx = 1; gsy = 1; gcolours = 2; break;
     case 12: gw = 640; gh = 480; gsx = 1; gsy = 1; gcolours = 16; break;
     case 13: gw = 320; gh = 200; gsx = 2; gsy = 2; gcolours = 256; break;
+    case 14:  // the whole screen, whatever its size (640x480 on most ports)
+        gw = FB_W; gh = FB_H; gsx = 1; gsy = 1; gcolours = 256; pages = 2; break;
     default: error(E_ILLEGAL_CALL);
     }
     if (mode)
@@ -5359,11 +5368,14 @@ static void set_screen_mode(int mode) {
     reset_view();
     active_page = visual_page = 0;
     screen_mode = mode;
-    // 200-line modes sit at the top, so their 25 text rows (8 lines each,
-    // 16 on screen) line up with the graphics as on a PC; others centre.
-    gyoff = gh * gsy == 400 ? 0 : (FB_H - gh * gsy) / 2;
+    // Modes centre on a bigger screen, across on whole text cells. 200-line
+    // modes sit at the top of a 640x480 screen (or where its top would be,
+    // centred on a bigger one), so their 25 text rows (8 lines each, 16 on
+    // screen) line up with the graphics as on a PC; others centre.
+    gxoff = (FB_W - gw * gsx) / 2 / 8 * 8;
+    gyoff = gh * gsy == 400 ? (FB_H - 480) / 2 / 16 * 16 : (FB_H - gh * gsy) / 2;
     default_palette();
-    gfg = mode == 0 ? 7 : mode == 13 ? 15 : gcolours - 1;
+    gfg = mode == 0 ? 7 : gcolours == 256 ? 15 : gcolours - 1;
     gbg = 0;
     last_x = gw / 2;
     last_y = gh / 2;
@@ -5385,7 +5397,7 @@ static int mouse_coord(bool want_x) {
         return 0;
     if (!screen_mode)
         return want_x ? x / 8 + 1 : y / 16 + 1;
-    int v = want_x ? x / gsx : (y - gyoff) / gsy, most = want_x ? gw - 1 : gh - 1;
+    int v = want_x ? (x - gxoff) / gsx : (y - gyoff) / gsy, most = want_x ? gw - 1 : gh - 1;
     return v < 0 ? 0 : v > most ? most : v;
 }
 
@@ -5969,7 +5981,7 @@ static bool cga_pixels(long addr, int *x, int *y) {
 /// @param rgb the colour
 static void raw_plot(int x, int y, uint8_t rgb) {
     if (x >= 0 && y >= 0 && x < gw && y < gh)
-        port_fill_rect(x * gsx, y * gsy + gyoff, gsx, gsy, rgb);
+        port_fill_rect(x * gsx + gxoff, y * gsy + gyoff, gsx, gsy, rgb);
 }
 
 /// PEEK: CGA screen memory, or 0.
@@ -6487,7 +6499,7 @@ static void sprite_restore(sprite_t *sp) {
         int k = (y - sp->oy) * sh->w + (sp->bx - sp->ox);
         for (int x = sp->bx; x < sp->bx + sp->bw; ++x, ++k, ++b)
             if (sh->mask[k] && read_rgb(x, y) == sh->px[k])
-                port_fill_rect(x * gsx, y * gsy + gyoff, gsx, gsy, *b);
+                port_fill_rect(x * gsx + gxoff, y * gsy + gyoff, gsx, gsy, *b);
     }
     sp->drawn = false;
 }
@@ -6519,7 +6531,7 @@ static void sprite_draw(sprite_t *sp) {
         int k = (y - y0) * sh->w + (cx1 - x0);
         for (int x = cx1; x <= cx2; ++x, ++k)
             if (sh->mask[k])
-                port_fill_rect(x * gsx, y * gsy + gyoff, gsx, gsy, sh->px[k]);
+                port_fill_rect(x * gsx + gxoff, y * gsy + gyoff, gsx, gsy, sh->px[k]);
     }
     sp->ox = x0;
     sp->oy = y0;
@@ -6776,7 +6788,7 @@ static void do_cls(void) {
     if (screen_mode && (n == 1 || active_page != visual_page)) {
         sprites_forget();
         if (n == 1)
-            port_fill_rect(0, gyoff, FB_W, gh * gsy, colour_rgb(gbg));
+            port_fill_rect(gxoff, gyoff, gw * gsx, gh * gsy, colour_rgb(gbg));
         else
             port_fill_rect(0, 0, FB_W, FB_H, colour_rgb(gbg));
         last_x = gw / 2;
@@ -7382,7 +7394,7 @@ static void fill_box(int x, int y, int w, int h, uint8_t rgb) {
     if (y + h - 1 > clip_y2)
         h = clip_y2 - y + 1;
     if (w > 0 && h > 0)
-        port_fill_rect(x * gsx, y * gsy + gyoff, w * gsx, h * gsy, rgb);
+        port_fill_rect(x * gsx + gxoff, y * gsy + gyoff, w * gsx, h * gsy, rgb);
 }
 
 /// In modes of 16 colours or fewer, the sheet's colours become the nearest
@@ -7632,7 +7644,8 @@ static void do_image(void) {
     file_name_arg(name, sizeof name, false);
     // Text mode: plain screen pixels.
     int sw = screen_mode ? gw : FB_W, sh = screen_mode ? gh : FB_H;
-    int sx = screen_mode ? gsx : 1, sy = screen_mode ? gsy : 1, yoff = screen_mode ? gyoff : 0;
+    int sx = screen_mode ? gsx : 1, sy = screen_mode ? gsy : 1;
+    int xoff = screen_mode ? gxoff : 0, yoff = screen_mode ? gyoff : 0;
     int x = 0, y = 0, w = sw, h = sh;
     bool fit = true;
     if (accept(",")) {
@@ -7652,8 +7665,8 @@ static void do_image(void) {
         }
     }
     out_flush();
-    const char *why = port_image(name, x * sx, y * sy + yoff, w * sx, h * sy, sx, sy, fit, 0,
-                                 yoff, sw * sx, yoff + sh * sy);
+    const char *why = port_image(name, x * sx + xoff, y * sy + yoff, w * sx, h * sy, sx, sy, fit,
+                                 xoff, yoff, xoff + sw * sx, yoff + sh * sy);
     if (why) {
         printf("%s: %s\n", name, why);
         error(!strcmp(why, "file not found") ? E_FILE_NOT_FOUND : E_ILLEGAL_CALL);
