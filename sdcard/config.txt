@@ -14,13 +14,26 @@ init_uart_clock=48000000
 # Full speed from the start (1 GHz on a Zero).
 force_turbo=1
 
-# 64 MB for the GPU is plenty for a 640x480 screen; the rest is BASIC's.
+# 64 MB for the GPU is plenty for a 640x480 screen scaled up to 1080p; the
+# rest is BASIC's.
 gpu_mem=64
 
-# HDMI (step 3): 640x480 at 60 Hz, even on a monitor that says otherwise.
-hdmi_group=2
-hdmi_mode=4
+# HDMI: the screen runs at the monitor's own best resolution, and the GPU
+# scales BASIC's 640x480 picture up to fill it (text stays 80x30, as on the
+# serial console). To choose the output yourself, set a mode instead:
+#   hdmi_group=1 and hdmi_mode=4 (720p), 16 (1080p), 2 (480p);
+#   hdmi_group=2 and hdmi_mode=4 (640x480: pixel for pixel), 16 (1024x768),
+#   35 (1280x1024).
+#hdmi_group=1
+#hdmi_mode=16
 disable_overscan=1
+
+# A widescreen monitor stretches the 4:3 picture sideways. To keep it 4:3
+# with black bars at the sides, inset it (pixels at the output resolution):
+#   1920x1080: 240 each side; 1280x720: 160; 1366x768: 171.
+#overscan_left=240
+#overscan_right=240
+#overscan_scale=1
 
 # HDMI mode, not DVI, even in the monitor timings above: sound goes over HDMI.
 hdmi_drive=2

@@ -85,6 +85,11 @@ with these differences:
 - **Settings** are in `SD:/BASIC.CFG` (the Pico's `CONFIG.TXT`, renamed,
   because the card's `config.txt` is the firmware's): `TZ`, `CLOCK`,
   `WATCHDOG` and so on.
+- **The screen** is 640x480 (80x30 text), scaled by the GPU to whatever the
+  monitor runs at: any HDMI screen works. `config.txt` can set the output
+  mode (`hdmi_group`/`hdmi_mode`; 640x480 gives sharp pixels) or keep a
+  widescreen picture 4:3 with bars at the sides (`overscan_left`/`right`);
+  the comments there say how.
 - **Getting files on and off:** paste a listing at the `Ok` prompt, or use
   `XRECV` and `XSEND` (XMODEM, YMODEM, ZMODEM) as on the Pico. Or put the
   card in the PC.
