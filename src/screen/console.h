@@ -36,6 +36,10 @@ extern int console_cols, console_rows;
 void console_init(void);
 /// Clears the screen.
 void console_clear(void);
+/// The screen changed size (DVI_WIDTH, DVI_HEIGHT): the text is sized to it
+/// again and cleared, cursor home. Freeze the console (console_freeze) from
+/// before the framebuffer moves until this has run.
+void console_resize(void);
 /// Sets the colours (RGB332) for text written from now on.
 /// @param fg the foreground colour (RGB332)
 /// @param bg the background colour (RGB332)

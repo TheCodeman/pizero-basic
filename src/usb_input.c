@@ -314,6 +314,11 @@ static void uspi_mouse_report(unsigned buttons, int dx, int dy) {
 
 int mouse_count(void) { return have_mouse ? 1 : 0; }
 
+void mouse_warp(int x, int y) {
+    mouse_x = x < 0 ? 0 : x >= DVI_WIDTH ? DVI_WIDTH - 1 : x;
+    mouse_y = y < 0 ? 0 : y >= DVI_HEIGHT ? DVI_HEIGHT - 1 : y;
+}
+
 void mouse_get(int *x, int *y, int *buttons) {
     *x = mouse_x;
     *y = mouse_y;

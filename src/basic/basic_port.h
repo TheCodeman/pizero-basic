@@ -126,6 +126,11 @@ int port_screen_height(void);
 int port_text_cols(void);
 int port_text_rows(void);
 ///@}
+/// WIDTH cols, rows in text mode: the text (and the screen with it) made
+/// that size, as near as the port can (rows 0: the screen's shape). It
+/// clears the screen. NULL, or why it couldn't (basic.c's weak version
+/// keeps 80x30 and says nothing).
+const char *port_set_text_size(int cols, int rows);
 
 /// Graphics on the RGB332 screen (coordinates already clipped).
 /// @param x the left
