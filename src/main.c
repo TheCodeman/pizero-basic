@@ -25,7 +25,7 @@
 #include "usb_input.h"
 
 #ifndef PIZERO_BASIC_VERSION
-#define PIZERO_BASIC_VERSION "0.9"
+#define PIZERO_BASIC_VERSION "0.10"
 #endif
 
 extern char *heap_limit;
@@ -76,7 +76,12 @@ static void board_banner(void) {
     if (fb_error) {
         printf("Screen: %s; the serial port only\n", fb_error);
     } else {
-        printf("Screen: %dx%d, %dx%d text\n", DVI_WIDTH, DVI_HEIGHT, CONSOLE_COLS, CONSOLE_ROWS);
+        int fw, fh;
+        fb_firmware_size(&fw, &fh);
+        printf("Screen: %dx%d, %dx%d text", DVI_WIDTH, DVI_HEIGHT, CONSOLE_COLS, CONSOLE_ROWS);
+        if (fw != DVI_WIDTH || fh != DVI_HEIGHT)
+            printf(" (the firmware said %dx%d)", fw, fh);
+        printf("\n");
         printf("Sound: %s\n", sound_error ? sound_error : "HDMI");
     }
     if (usb_error)
@@ -113,13 +118,13 @@ int main(void) {
     board_init();
     gpio_write(47, 1);  // the ACT LED off (it is on when low)
     gpio_function(47, GPIO_OUT);
+    sd_error = sd_disk_mount();  // first: fb_init() may read config.txt
     fb_error = fb_init();
     if (!fb_error)
         terminal_screen_start();
     sound_error = fb_error ? "no screen" : audio_init();
     printf("Pi Zero BASIC: starting USB...\n");
     usb_error = usb_input_init();
-    sd_error = sd_disk_mount();
     config_load();
     printf("\x1b[0m\x1b[2J\x1b[H");
     board_banner();

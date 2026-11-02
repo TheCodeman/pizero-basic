@@ -13,7 +13,12 @@
  */
 #include "fb.h"
 
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+
 #include "dvi.h"
+#include "ff.h"
 #include "rpi.h"
 
 #define FB_VIRT 0x30000000u
@@ -135,9 +140,87 @@ const char *fb_set_size(int w, int h) {
     return why;
 }
 
+/// The size of an HDMI mode (hdmi_group 1 is CEA, 2 is DMT), or false.
+static bool mode_size(int group, int mode, int *w, int *h) {
+    static const struct { uint8_t group, mode; uint16_t w, h; } modes[] = {
+        {1, 1, 640, 480},    {1, 2, 720, 480},    {1, 3, 720, 480},    {1, 4, 1280, 720},
+        {1, 5, 1920, 1080},  {1, 16, 1920, 1080}, {1, 17, 720, 576},   {1, 18, 720, 576},
+        {1, 19, 1280, 720},  {1, 20, 1920, 1080}, {1, 31, 1920, 1080}, {1, 32, 1920, 1080},
+        {1, 33, 1920, 1080}, {1, 34, 1920, 1080},
+        {2, 4, 640, 480},    {2, 8, 800, 600},    {2, 9, 800, 600},    {2, 10, 800, 600},
+        {2, 16, 1024, 768},  {2, 17, 1024, 768},  {2, 18, 1024, 768},  {2, 23, 1280, 768},
+        {2, 27, 1280, 800},  {2, 28, 1280, 800},  {2, 32, 1280, 960},  {2, 35, 1280, 1024},
+        {2, 36, 1280, 1024}, {2, 39, 1360, 768},  {2, 42, 1400, 1050}, {2, 47, 1440, 900},
+        {2, 51, 1600, 1200}, {2, 58, 1680, 1050}, {2, 68, 1920, 1200}, {2, 69, 1920, 1200},
+        {2, 81, 1366, 768},  {2, 82, 1920, 1080}, {2, 85, 1280, 720},
+    };
+    for (unsigned i = 0; i < sizeof modes / sizeof modes[0]; i++)
+        if (modes[i].group == group && modes[i].mode == mode) {
+            *w = modes[i].w;
+            *h = modes[i].h;
+            return true;
+        }
+    return false;
+}
+
+/// The size config.txt on the card asks for (framebuffer_width/height, or
+/// hdmi_group/hdmi_mode), in case the firmware doesn't say: false if none.
+/// Lines under a [filter] other than [all], [pi0] and [pi0w] don't count.
+static bool config_size(int *w, int *h) {
+    FIL f;
+    if (f_open(&f, "SD:/config.txt", FA_READ) != FR_OK)
+        return false;
+    int group = 0, mode = 0, fw = 0, fh = 0;
+    bool ours = true;
+    char line[128];
+    while (f_gets(line, sizeof line, &f)) {
+        char *s = line + strspn(line, " \t");
+        s[strcspn(s, "#\r\n")] = 0;
+        if (*s == '[') {
+            ours = !strncasecmp(s, "[all]", 5) || !strncasecmp(s, "[pi0]", 5) ||
+                   !strncasecmp(s, "[pi0w]", 6);
+            continue;
+        }
+        char *eq = strchr(s, '=');
+        if (!ours || !eq)
+            continue;
+        *eq = 0;
+        int v = atoi(eq + 1);
+        s[strcspn(s, " \t")] = 0;
+        if (!strcasecmp(s, "hdmi_group"))
+            group = v;
+        else if (!strcasecmp(s, "hdmi_mode"))
+            mode = v;
+        else if (!strcasecmp(s, "framebuffer_width"))
+            fw = v;
+        else if (!strcasecmp(s, "framebuffer_height"))
+            fh = v;
+    }
+    f_close(&f);
+    if (fw > 0 && fh > 0) {
+        *w = fw;
+        *h = fh;
+        return true;
+    }
+    return mode_size(group, mode, w, h);
+}
+
+static int firmware_w, firmware_h;  ///< what the firmware said at start-up
+
+void fb_firmware_size(int *w, int *h) {
+    *w = firmware_w;
+    *h = firmware_h;
+}
+
 const char *fb_init(void) {
-    int w, h;
+    int w, h, cw, ch;
     firmware_size(&w, &h);
+    firmware_w = w;
+    firmware_h = h;
+    // The firmware should say config.txt's size; if it says something else
+    // (or nothing), config.txt on the card decides.
+    if (config_size(&cw, &ch) && (cw != w || ch != h))
+        w = cw, h = ch;
     if (w < 640 || h < 480)
         w = 640, h = 480;
     display_w = w;
