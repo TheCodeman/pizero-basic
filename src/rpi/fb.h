@@ -7,8 +7,10 @@
 #pragma once
 #include <stdbool.h>
 
-/// Asks the firmware for a framebuffer at its screen size, maps it at
-/// dvi_framebuf and sets DVI_WIDTH and DVI_HEIGHT: NULL, or why not.
+/// Asks the firmware for a framebuffer at its screen size (or the size
+/// config.txt on the card asks for, if the firmware says otherwise: so the
+/// SD card is mounted first), maps it at dvi_framebuf and sets DVI_WIDTH
+/// and DVI_HEIGHT: NULL, or why not.
 const char *fb_init(void);
 /// There is a screen.
 bool fb_present(void);
@@ -20,3 +22,5 @@ const char *fb_set_size(int w, int h);
 /// The screen's size as the firmware gave it at start-up (the HDMI mode,
 /// or config.txt's framebuffer size).
 void fb_display_size(int *w, int *h);
+/// What the firmware said the screen's size was at start-up (0x0: nothing).
+void fb_firmware_size(int *w, int *h);
