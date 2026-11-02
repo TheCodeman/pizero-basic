@@ -105,6 +105,13 @@ with these differences:
   keep their own sizes, centred; `SCREEN 14` is the whole screen at its own
   size with 256 colours (`RGB()` or 0-255 as in `SCREEN 13`), two pages.
   Over 1920x1200 (4K) the screen is halved and scaled up.
+  `WIDTH cols, rows` at the prompt or in a program changes it on the fly:
+  the screen becomes that many 8x16 cells (`WIDTH 128, 48` is 1024x768),
+  cleared, and the GPU scales it to the HDMI mode, which stays as it is.
+  `WIDTH cols` alone keeps the mode's shape (`WIDTH 160` on a 1080p screen
+  is 160 x 45). 80 x 30 to 240 x 75; QBasic's `WIDTH 40` or `WIDTH 80, 25`
+  leave it at 80 x 30. A terminal that takes xterm's resize sequence
+  follows; set others by hand.
 - **`EDIT`** opens the full-screen editor, on both.
 - **Pins:** `PIN` and `PIN MODE` work on GPIO 0-27 of the header (14 and 15
   are the console). `PIN LED` is the green ACT LED (GPIO47). `TEMP()` is the

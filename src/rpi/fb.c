@@ -60,15 +60,28 @@ static uint32_t allocate(int w, int h, uint32_t *size, uint32_t *pitch_out) {
     return m[alloc + 3];
 }
 
-const char *fb_init(void) {
-    int w, h;
-    firmware_size(&w, &h);
-    if (w < 640 || h < 480)
-        w = 640, h = 480;
-    while (w > DVI_MAX_WIDTH || h > DVI_MAX_HEIGHT)
-        w /= 2, h /= 2;
-    w &= ~7;  // whole text cells across
+/// Gives the framebuffer back, before asking for another size.
+static void release(void) {
+    static volatile uint32_t m[6] __attribute__((aligned(16)));
+    m[0] = sizeof m;
+    m[1] = 0;
+    m[2] = 0x48001; m[3] = 0; m[4] = 0;
+    m[5] = 0;
+    mbox_property(m);
+}
 
+static int display_w = 640, display_h = 480;  ///< the size the firmware gave at start-up
+
+void fb_display_size(int *w, int *h) {
+    *w = display_w;
+    *h = display_h;
+}
+
+/// Allocates, colours and maps a w x h framebuffer (w a multiple of 8).
+static const char *set_size(int w, int h) {
+    if (fb_ok)
+        release();
+    fb_ok = false;
     uint32_t base = 0, size = 0, pitch = 0;
     for (int tries = 0; tries < 2; tries++) {
         base = allocate(w, h, &size, &pitch);
@@ -100,11 +113,36 @@ const char *fb_init(void) {
     pal[7 + 256] = 0;  // the end tag
     mbox_property(pal);  // a firmware without it keeps its default palette
 
-    dvi_framebuf = mmu_map_write_through(FB_VIRT, base, (uint32_t)(w * h));
-    if (!dvi_framebuf)
+    uint8_t *fb = mmu_map_write_through(FB_VIRT, base, (uint32_t)(w * h));
+    if (!fb)
         return "the framebuffer can't be mapped";
+    dvi_framebuf = fb;
     dvi_width = w;
     dvi_height = h;
     fb_ok = true;
     return 0;
+}
+
+const char *fb_set_size(int w, int h) {
+    if (!fb_ok)
+        return "no screen";
+    if (w < 640 || h < 480 || w > DVI_MAX_WIDTH || h > DVI_MAX_HEIGHT || (w & 7))
+        return "the size is out of range";
+    int old_w = dvi_width, old_h = dvi_height;
+    const char *why = set_size(w, h);
+    if (why)
+        set_size(old_w, old_h);  // back as it was, if the firmware will
+    return why;
+}
+
+const char *fb_init(void) {
+    int w, h;
+    firmware_size(&w, &h);
+    if (w < 640 || h < 480)
+        w = 640, h = 480;
+    display_w = w;
+    display_h = h;
+    while (w > DVI_MAX_WIDTH || h > DVI_MAX_HEIGHT)
+        w /= 2, h /= 2;
+    return set_size(w & ~7, h);  // whole text cells across
 }

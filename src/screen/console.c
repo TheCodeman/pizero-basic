@@ -928,7 +928,8 @@ void console_set_color(uint8_t new_fg, uint8_t new_bg) {
     busy = false;
 }
 
-void console_init(void) {
+/// Sizes the text to the screen and clears it, cursor home.
+static void fit_screen(void) {
     console_cols = DVI_WIDTH / GLYPH_W;
     console_rows = DVI_HEIGHT / GLYPH_H;
     scroll_top = view_top = 0;
@@ -937,6 +938,21 @@ void console_init(void) {
     memset(cell_ch, ' ', sizeof cell_ch);
     memset(cell_attr, attr_of(fg, bg), sizeof cell_attr);
     cur_col = cur_row = 0;
+    wrap_pending = false;
+}
+
+void console_resize(void) {
+    cursor_shown = false;  // the screen it was drawn on is gone
+    pointer_row = -1;
+    if (alt_saved) {
+        psram_free(alt_saved);
+        alt_saved = NULL;
+    }
+    fit_screen();
+}
+
+void console_init(void) {
+    fit_screen();
     add_repeating_timer_ms(CURSOR_BLINK_MS, blink_callback, NULL, &blink_timer);
     add_repeating_timer_ms(POINTER_MS, pointer_callback, NULL, &pointer_timer);
 }

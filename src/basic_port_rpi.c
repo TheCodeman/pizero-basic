@@ -33,6 +33,7 @@
 #include "image.h"
 #include "mod/mod.h"
 #include "mod/xm.h"
+#include "rpi/fb.h"
 #include "rpi/rpi.h"
 #include "screen/console.h"
 #include "screen/mouse.h"
@@ -172,6 +173,28 @@ int port_screen_width(void) { return DVI_WIDTH; }
 int port_screen_height(void) { return DVI_HEIGHT; }
 int port_text_cols(void) { return CONSOLE_COLS; }
 int port_text_rows(void) { return CONSOLE_ROWS; }
+
+const char *port_set_text_size(int cols, int rows) {
+    if (!fb_present())
+        return NULL;  // the serial terminal's size is its own
+    if (rows <= 0) {  // the HDMI mode's shape
+        int dw, dh;
+        fb_display_size(&dw, &dh);
+        rows = (int)((long)cols * 8 * dh / dw / 16);
+    }
+    cols = cols < 80 ? 80 : cols > CONSOLE_MAX_COLS ? CONSOLE_MAX_COLS : cols;
+    rows = rows < 30 ? 30 : rows > CONSOLE_MAX_ROWS ? CONSOLE_MAX_ROWS : rows;
+    if (cols == CONSOLE_COLS && rows == CONSOLE_ROWS)
+        return NULL;
+    port_reset_pages();
+    console_freeze(true);  // the cursor's blink and the pointer keep off it while it moves
+    const char *why = fb_set_size(cols * 8, rows * 16);
+    draw_fb = NULL;
+    console_resize();
+    console_freeze(false);
+    mouse_warp(DVI_WIDTH / 2, DVI_HEIGHT / 2);
+    return why;
+}
 
 void port_fill_rect(int x, int y, int w, int h, uint8_t rgb332) {
     uint8_t *row = &(draw_fb ? draw_fb : dvi_framebuf)[y * DVI_WIDTH + x];

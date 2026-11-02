@@ -5016,6 +5016,10 @@ __attribute__((weak)) int port_screen_width(void) { return 640; }
 __attribute__((weak)) int port_screen_height(void) { return 480; }
 __attribute__((weak)) int port_text_cols(void) { return 80; }
 __attribute__((weak)) int port_text_rows(void) { return 30; }
+__attribute__((weak)) const char *port_set_text_size(int cols, int rows) {
+    (void)cols, (void)rows;
+    return NULL;
+}
 
 static int screen_mode;            ///< 0 = text
 static int page_count = 1;          ///< screen pages the mode has
@@ -10114,15 +10118,37 @@ static int statement(void) {
     } else if (accept("COM(")) {
         set_event_state(event_number("COM"));
     } else if (accept_word("WIDTH")) {
-        // WIDTH 80 in SCREEN 1 switches to SCREEN 2 and WIDTH 40
-        // in SCREEN 2 back. Text otherwise stays 80 columns.
+        // WIDTH 80 in SCREEN 1 switches to SCREEN 2 and WIDTH 40 in
+        // SCREEN 2 back. In text mode WIDTH cols[, rows] sizes the text
+        // where the port can (the Pi: the screen becomes cols x rows 8x16
+        // cells; without rows they take the screen's shape); elsewhere
+        // text stays 80 columns.
         skip_spaces();
         if (isdigit((unsigned char)*p)) {
-            int w = arg_int();
+            int w = arg_int(), rows = 0;
             if (w == 80 && screen_mode == 1)
                 set_screen_mode(2);
             else if (w == 40 && screen_mode == 2)
                 set_screen_mode(1);
+            else if (screen_mode == 0) {
+                if (accept(","))
+                    rows = arg_int();
+                int old_cols = SCREEN_COLS, old_rows = SCREEN_ROWS;
+                out_flush();
+                const char *why = port_set_text_size(w, rows);
+                if (why) {
+                    printf("WIDTH: %s\n", why);
+                    error(E_ILLEGAL_CALL);
+                }
+                if (SCREEN_COLS != old_cols || SCREEN_ROWS != old_rows) {
+                    // The serial terminal too, where it takes xterm's resize.
+                    printf("\x1b[8;%d;%dt\x1b[2J\x1b[H", SCREEN_ROWS, SCREEN_COLS);
+                    out_row = out_col = 0;
+                    out_flush();
+                    if (key_line_on)
+                        draw_key_line();
+                }
+            }
         }
         skip_statement();
     } else {
