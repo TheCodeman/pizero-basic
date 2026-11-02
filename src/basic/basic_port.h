@@ -118,7 +118,16 @@ double port_seconds(void);
 /// @return free bytes
 size_t port_free_mem(void);
 
-/// Graphics on the 640x480 RGB332 screen (coordinates already clipped).
+/// The screen's size in pixels and in 8x16 text cells. basic.c has weak
+/// versions giving 640x480 and 80x30, for ports whose screen is that.
+///@{
+int port_screen_width(void);
+int port_screen_height(void);
+int port_text_cols(void);
+int port_text_rows(void);
+///@}
+
+/// Graphics on the RGB332 screen (coordinates already clipped).
 /// @param x the left
 /// @param y the top
 /// @param w the width

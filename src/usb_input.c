@@ -301,7 +301,7 @@ bool usb_key_down(int scan) {
 
 // ---- The mouse: what pico-os's console.c and BASIC ask (mouse.h) ---------------------
 
-static volatile int mouse_x = DVI_WIDTH / 2, mouse_y = DVI_HEIGHT / 2, mouse_buttons;
+static volatile int mouse_x = 320, mouse_y = 240, mouse_buttons;  // fb_init() may move it
 static int pointer_mode = MOUSE_POINTER_OFF;
 
 static void uspi_mouse_report(unsigned buttons, int dx, int dy) {

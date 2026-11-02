@@ -14,15 +14,17 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "dvi.h"
 #include "ff.h"
 #include "image_rows.h"
 #include "lodepng.h"
 #include "tjpgd.h"
 
-/// The screen's width.
-#define SCREEN_W 640
-/// Its height.
-#define SCREEN_H 480
+/// The screen's size.
+///@{
+#define SCREEN_W DVI_WIDTH
+#define SCREEN_H DVI_HEIGHT
+///@}
 #define MAX_PIXELS (2600u * 1000u)  ///< ~7.8 MB as RGB: what PSRAM can hold
 
 // ---- Memory: pictures go in PSRAM when there is some ----------------------
@@ -747,7 +749,7 @@ static void draw_part(const image_t *img, uint8_t *fb, int stride, int x, int y,
     int64_t step = ((int64_t)img->w << 16) / w;
     // Each row is made in SRAM, then copied out whole: a picture in PSRAM is
     // then written a row at a time, not byte by byte between reads.
-    uint8_t buf[SCREEN_W];
+    uint8_t buf[DVI_MAX_WIDTH];
     bool via = x1 - x0 <= SCREEN_W;
     for (int dy = y0; dy < y1; ++dy) {
         int sy = (int)((long long)(dy - y) * img->h / h);

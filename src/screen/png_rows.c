@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dvi.h"
 #include "image.h"
 #include "image_rows.h"
 
@@ -354,7 +355,7 @@ static void row_done(ps_t *s) {
                 }
             }
         }
-        uint8_t line[640];
+        uint8_t line[DVI_MAX_WIDTH];
         while (s->dy < s->h && (int)((long long)s->dy * s->ih / s->h) == s->sy) {
             uint8_t *dst = s->px + (size_t)s->dy * s->w;
             // Made in SRAM, copied out whole (the picture is likely in PSRAM).

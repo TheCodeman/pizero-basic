@@ -1,6 +1,7 @@
 /**
  * @file console.h
- * @brief 80x30 text console drawn into the DVI framebuffer with an 8x16 font.
+ * @brief Text console drawn into the DVI framebuffer with an 8x16 font: 80x30
+ * on a 640x480 screen, more on a bigger one.
  *
  * It understands the common VT100/ANSI escape sequences: cursor movement and
  * positioning (ESC [ A B C D E F G H d f), erase (J K X), insert and delete
@@ -18,10 +19,18 @@
 #include <stdint.h>
 #include "pico/stdio/driver.h"
 
-/// Text columns on the console.
-#define CONSOLE_COLS 80
-/// Text rows on the console.
-#define CONSOLE_ROWS 30
+/// The most text columns and rows (a 1920x1200 screen in 8x16 cells).
+///@{
+#define CONSOLE_MAX_COLS 240
+#define CONSOLE_MAX_ROWS 75
+///@}
+/// Text columns and rows on the console: the screen's size in 8x16 cells,
+/// set by console_init() (80x30 on a 640x480 screen).
+///@{
+extern int console_cols, console_rows;
+#define CONSOLE_COLS console_cols
+#define CONSOLE_ROWS console_rows
+///@}
 
 /// Clears the screen and sets up the console (cursor blink, mouse pointer timers).
 void console_init(void);

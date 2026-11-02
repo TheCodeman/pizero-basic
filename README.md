@@ -89,12 +89,22 @@ with these differences:
   `XRECV` and `XSEND` (XMODEM, YMODEM, ZMODEM) as on the Pico. Or put the
   card in the PC.
 - **The screen and keyboard:** the HDMI screen shows the same as the serial
-  terminal (80 x 30 text), and `SCREEN`, `LINE`, `CIRCLE`, `PAINT`, pages,
+  terminal (80 x 30 text at 640x480), and `SCREEN`, `LINE`, `CIRCLE`, `PAINT`, pages,
   `IMAGE` (BMP, PNG, JPEG) and `SAVEIMAGE` draw on it as on pico-os. Type on
   either the USB keyboard (US layout) or the serial terminal. Plug the
   keyboard into the Zero's USB socket (the one marked USB, through an OTG
   adapter) before power-up: USB devices are found once, at start-up. A mouse
   needs a hub for both; it has no wheel. Ctrl-Alt-Del restarts.
+- **Screen size:** `sdcard/config.txt` picks 640x480. Another HDMI mode
+  there (its comments list some: 1024x768, 1280x720, 1920x1080...) or none
+  (the monitor's own) gives a bigger screen, and the text fills it in 8x16
+  cells: 128 x 48 at 1024x768, 240 x 67 at 1920x1080. The banner says the
+  size. Set the serial terminal to the same, since both show the same text.
+  `framebuffer_width` and `framebuffer_height` in `config.txt` draw a
+  smaller picture the GPU scales up (bigger letters). The `SCREEN` modes
+  keep their own sizes, centred; `SCREEN 14` is the whole screen at its own
+  size with 256 colours (`RGB()` or 0-255 as in `SCREEN 13`), two pages.
+  Over 1920x1200 (4K) the screen is halved and scaled up.
 - **`EDIT`** opens the full-screen editor, on both.
 - **Pins:** `PIN` and `PIN MODE` work on GPIO 0-27 of the header (14 and 15
   are the console). `PIN LED` is the green ACT LED (GPIO47). `TEMP()` is the
@@ -164,7 +174,7 @@ with these differences:
 | `src/net/` | the network: lwIP on the Wi-Fi chip, joining, DHCP and SNTP (`net.c`), MQTT (`mqtt_port.c`), lwIP's settings |
 | `lib/lwip/` | [lwIP](https://savannah.nongnu.org/projects/lwip/) 2.2.1 (BSD): the core, IPv4, SNTP and MQTT |
 | `src/rpi/pins.c` | PWM, I2C (BSC) and SPI0 |
-| `src/rpi/fb.c` | the HDMI framebuffer (640x480, RGB332 palette) |
+| `src/rpi/fb.c` | the HDMI framebuffer (config.txt's size, RGB332 palette) |
 | `src/rpi/hdmi_sound.c` | sound over HDMI: 48 kHz stereo into the HDMI audio FIFO by DMA (after Circle's driver, GPLv3) |
 | `src/audio.c` | the sound mixer: tones, PLAY's queue and the music, as in pico-os |
 | `src/mod/` | pico-os's MOD and XM players (MIT), as they are there |
@@ -179,5 +189,9 @@ with these differences:
 | `src/compat/` | the few Pico SDK calls those use, on the Pi's timer |
 
 The files from pico-basic are copied unchanged, except for FatFs's volume
-names (just `SD`) in `ffconf.h` and a `PIZERO` case in `config.c`. Keep them
+names (just `SD`) in `ffconf.h`, a `PIZERO` case in `config.c`, and the
+screen's size: `basic.c` asks the port for it (`port_screen_width()` and
+the rest, with weak 640x480 / 80x30 versions so pico-basic's ports need
+nothing) and has `SCREEN 14`, and pico-os's `console.c` sizes its text to
+the screen. Keep them
 in step with pico-basic by copying them over again.

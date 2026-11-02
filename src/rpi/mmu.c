@@ -64,31 +64,27 @@ void mmu_init(uint32_t ram_top) {
         : "memory");
 }
 
-/// One coarse (second-level) table: 1 MB of 4 KB pages, for mmu_map_pages.
-static uint32_t l2[256] __attribute__((aligned(1024)));
-static uint32_t l2_virt = 0xFFFFFFFFu;  ///< the MB it covers
+/// Normal memory, write-through (TEX 000, C): the framebuffer, so drawing
+/// reads from the cache and writes reach the GPU at once.
+#define MEM_WRITE_THROUGH (SECT | SECT_AP_RW | SECT_C | SECT_XN)
 
-/// Small page (ARMv6), write-through (TEX 000, C), read/write, no execute.
-#define PAGE_WT (0x2u | 0x1u | (1u << 3) | (3u << 4))
-
-bool mmu_map_write_through(uint32_t virt, uint32_t phys, uint32_t len) {
-    uint32_t mb = virt & ~0xFFFFFu;
-    if (((virt | phys) & 0xFFF) || virt + len > mb + 0x100000u)
-        return false;  // one coarse table: pages within one MB
-    if (l2_virt != mb && l2_virt != 0xFFFFFFFFu)
-        return false;
-    l2_virt = mb;
-    for (uint32_t off = 0; off < len; off += 4096)
-        l2[((virt + off) >> 12) & 0xFF] = ((phys + off) & ~0xFFFu) | PAGE_WT;
-    ttb[mb >> 20] = ((uint32_t)(uintptr_t)l2 & ~0x3FFu) | 0x1u;  // coarse table, domain 0
-    // The table walk doesn't look in the data cache: write the tables out.
-    dcache_clean_invalidate(l2, sizeof l2);
-    dcache_clean_invalidate(&ttb[mb >> 20], 4);
+void *mmu_map_write_through(uint32_t virt, uint32_t phys, uint32_t len) {
+    virt &= ~0xFFFFFu;
+    uint32_t first = phys & ~0xFFFFFu, end = phys + len;
+    if (!len || end < phys || virt + (end - first) < virt)
+        return 0;
+    for (uint32_t mb = first; mb < end; mb += 0x100000u) {
+        ttb[(virt + (mb - first)) >> 20] = mb | MEM_WRITE_THROUGH;
+        if (mb + 0x100000u < mb)
+            break;
+    }
+    // The table walk doesn't look in the data cache: write the table out.
+    dcache_clean_invalidate(&ttb[virt >> 20], ((end - first + 0xFFFFFu) >> 20) * 4);
     __asm volatile(
         "mcr p15, 0, %0, c8, c7, 0\n"   // invalidate TLBs
         "mcr p15, 0, %0, c7, c5, 4\n"   // flush prefetch buffer
         ::"r"(0) : "memory");
-    return true;
+    return (void *)(uintptr_t)(virt + (phys - first));
 }
 
 void dcache_clean_invalidate(const void *addr, size_t len) {

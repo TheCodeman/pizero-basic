@@ -5,7 +5,8 @@
  * Core 1's USB task feeds it; programs on core 0 read where it is and what
  * happened.
  *
- * Positions are screen pixels, 0..639 and 0..479 (a text cell is 8 x 16).
+ * Positions are screen pixels, 0..DVI_WIDTH-1 and 0..DVI_HEIGHT-1 (a text
+ * cell is 8 x 16).
  *
  * @author Ken Segler
  * @copyright Copyright (c) 2026 Ken Segler
